@@ -1,107 +1,136 @@
-# Global Finance
+# Global Finance - Management Reporting Platform
 
-A streamlined management reporting platform with AI-powered insights, scenario modeling, and operational performance tracking.
+A comprehensive management reporting and analytics platform built with Next.js, featuring dynamic Excel data integration, scenario modeling, and operational performance tracking.
 
 ## Features
 
-### 1. Executive Summary
-- Personalized dashboard with user profile picture
+### 📊 Executive Summary
+- Dynamic KPI tiles generated from uploaded Excel data
 - AI-powered search functionality
-- Personalized metric tiles showing key business insights
+- Personalized insights based on data metrics
 - Real-time data visualization
 
-### 2. Scenario Modeling
-- Interactive adjustment levers for what-if analysis
-- Performance Driver Tree visualization (from uploaded Excel data)
-- Natural language scenario description input
+### 🔄 Scenario Modeling
+- Excel-driven adjustment levers extracted from driver tree
+- Performance Driver Tree visualization
+- Natural language scenario description
 - P&L impact calculations
-- Real-time scenario analysis
+- What-if analysis capabilities
 
-### 3. Operational Performance
-- Manufacturing performance metrics
-- Plant performance tracking
-- Supply chain metrics
-- Digital & innovation KPIs
-- Operational efficiency drivers
+### 📈 Operational Performance
+- Manufacturing metrics (OEE, Production Volume, Quality Rate)
+- Supply chain metrics (Inventory Turns, On-Time Delivery)
+- Digital transformation metrics
+- Excel data-driven performance tracking
 
-### 4. Data Upload
-- Excel file upload interface
-- Supports Driver Tree, Accounting Fact, Rate Fact, and Product DIM sheets
-- Shared data across all pages
-- Real-time data synchronization
+### 📤 Data Upload
+- Excel file upload and parsing
+- Driver Tree structure extraction
+- Accounting and Rate Facts processing
+- Product dimension mapping
+
+## Technology Stack
+
+- **Framework**: Next.js 14
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Animations**: Framer Motion
+- **Charts**: Recharts
+- **UI Components**: Radix UI
+- **Excel Processing**: xlsx
+- **Data Storage**: Supabase / Vercel KV / In-memory fallback
 
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js >= 18.0.0
 - npm or yarn
 
 ### Installation
 
-1. Install dependencies:
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd "Global Finance"
+```
+
+2. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Run the development server:
+3. Run the development server:
 ```bash
 npm run dev
 ```
 
-3. Open [http://localhost:3002](http://localhost:3002) in your browser
-
-### Building for Production
-
-```bash
-npm run build
-npm start
-```
+4. Open [http://localhost:3002](http://localhost:3002) in your browser
 
 ## Project Structure
 
 ```
 Global Finance/
 ├── app/
-│   ├── page.tsx                    # Executive Summary
-│   ├── scenario-modeling/          # Scenario Modeling page
-│   ├── operational-performance/   # Operational Performance page
-│   ├── data-upload/                # Data Upload page
-│   ├── api/excel-data/             # API route for Excel data
-│   ├── layout.tsx                  # Root layout
-│   ├── layout-wrapper.tsx          # Layout wrapper
-│   ├── management-layout.tsx       # Management layout with sidebar
-│   └── globals.css                 # Global styles
+│   ├── api/
+│   │   └── excel-data/      # API routes for Excel data management
+│   ├── data-upload/         # Excel upload page
+│   ├── operational-performance/  # Operational metrics page
+│   ├── scenario-modeling/    # Scenario modeling page
+│   ├── layout.tsx           # Root layout
+│   ├── page.tsx             # Executive Summary page
+│   └── ...
 ├── components/
-│   └── ExcelUpload.tsx             # Excel upload component
+│   ├── ExcelUpload.tsx      # Excel upload component
+│   └── DisclaimerModal.tsx # Disclaimer modal
 ├── lib/
-│   ├── excel-parser.ts             # Excel parsing logic
-│   └── db.ts                       # Database integration
-└── public/                         # Static assets
+│   ├── excel-parser.ts      # Excel file parsing logic
+│   ├── excel-metrics.ts     # Metrics extraction utilities
+│   ├── db.ts                # Database integration
+│   └── ...
+└── ...
 ```
 
 ## Excel File Format
 
-The application expects an Excel file with the following sheets:
+The platform expects Excel files with the following sheets:
 
-1. **Driver Tree** - Hierarchical structure of performance drivers with levels
-2. **Accounting Fact** - Accounting amounts by driver and period
-3. **Rate Fact** or **Fee Rate Fact** - Rate data by driver and period
-4. **Product DIM** (optional) - Product dimension data
+1. **Driver Tree**: Hierarchical structure with levels (Level 1, Level 2, etc.)
+2. **Accounting Fact**: Period data with accounting amounts
+3. **Rate Fact** or **Fee Rate Fact**: Rate data for percentage-based metrics
+4. **Product DIM** (optional): Product dimension mapping
 
-## Technology Stack
+## Features in Detail
 
-- **Next.js 14** - React framework
-- **TypeScript** - Type safety
-- **Tailwind CSS** - Styling
-- **Framer Motion** - Animations
-- **Radix UI** - UI components
-- **xlsx** - Excel file parsing
-- **Lucide React** - Icons
+### Dynamic Data Integration
+- All pages automatically update when a new Excel file is uploaded
+- Metrics are extracted and calculated from the driver tree structure
+- Real-time data synchronization across all views
 
-## Notes
+### Scenario Modeling
+- Automatic lever extraction from Level 5 (leaf) nodes
+- Scenario generation based on top drivers
+- Natural language parsing for scenario descriptions
+- Comprehensive P&L impact analysis
 
-- The application runs on port 3002 (different from the original project on 3001)
-- All pages pull data from the uploaded Excel file
-- Data is shared across all pages via API routes
-- The Performance Driver Tree appears in Scenario Modeling when Excel data is uploaded
+### Error Handling
+- Comprehensive error handling throughout the application
+- Graceful fallbacks to default data when Excel data is unavailable
+- Detailed error logging for debugging
 
+## Development
+
+### Available Scripts
+
+- `npm run dev` - Start development server on port 3002
+- `npm run build` - Build for production
+- `npm run start` - Start production server
+- `npm run lint` - Run ESLint
+
+## License
+
+Private - Accenture Internal Use
+
+## Author
+
+Built for Accenture Management Reporting Platform
