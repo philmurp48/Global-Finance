@@ -1,0 +1,317 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Variables for Finance360 - Official Accenture Branding */
+:root {
+    /* Accenture Brand Colors - Official Standards */
+    
+    /* Primary Brand Palette - Official Accenture Purple #A100FF */
+    --primary-navy: 15 23 42; /* #0f172a - Dark slate (Accenture) */
+    --primary-navy-light: 30 41 59; /* #1e293b - Light slate */
+    --primary-purple: 161 0 255; /* #A100FF - Official Accenture Purple */
+    --primary-purple-dark: 117 0 192; /* #7500C0 - Dark purple */
+    --primary-purple-light: 194 163 255; /* #C2A3FF - Light purple */
+    
+    /* Secondary Palette - Accenture Colors */
+    --secondary-purple: 161 0 255; /* #A100FF - Official Accenture Purple */
+    --secondary-purple-light: 194 163 255; /* #C2A3FF - Light purple */
+    --secondary-blue: 59 130 246; /* #3b82f6 - Accenture Blue */
+    --secondary-success: 16 185 129; /* #10b981 - Success green */
+    --secondary-warning: 245 158 11; /* #f59e0b - Warning amber */
+    --secondary-danger: 239 68 68; /* #ef4444 - Danger red */
+    
+    /* Official Accenture Purple */
+    --primary: 161 0 255; /* #A100FF - Official Accenture Purple */
+    --primary-dark: 117 0 192; /* #7500C0 */
+    --primary-light: 194 163 255; /* #C2A3FF */
+    
+    /* Background colors */
+    --background: 255 255 255; /* White */
+    --background-secondary: 249 250 251; /* Light gray */
+    --background-dark: 15 23 42; /* Dark slate (Accenture) */
+    
+    /* Text colors */
+    --text-primary: 17 24 39; /* Dark gray */
+    --text-secondary: 107 114 128; /* Medium gray */
+    --text-muted: 156 163 175; /* Light gray */
+    --text-inverse: 255 255 255; /* White */
+    
+    /* Semantic colors - Accenture palette */
+    --accent-green: 16 185 129; /* #10b981 - Success green */
+    --accent-red: 239 68 68; /* #ef4444 - Danger red */
+    --accent-yellow: 245 158 11; /* #f59e0b - Warning amber */
+    
+    /* Border color */
+    --border: 229 231 235; /* Light gray */
+    --border-purple: 161 0 255; /* Official Accenture Purple border */
+    
+    /* Effects */
+    --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    --glow-purple: 0 0 20px rgba(161, 0, 255, 0.5);
+    --glow-purple-intense: 0 0 40px rgba(161, 0, 255, 0.8);
+    
+    /* Tailwind CSS variables for UI components (HSL format) */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 270 100% 50%; /* #A100FF - Official Accenture Purple */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 98%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 98%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border-color: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 270 100% 50%; /* #A100FF - Official Accenture Purple */
+    --radius: 0.5rem;
+}
+
+/* Graphik Font Import - Removed duplicate Inter import (handled by Next.js) */
+
+/* Global styles */
+body {
+    font-family: 'Graphik', 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: rgb(var(--background));
+    color: rgb(var(--text-primary));
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Utility classes for Finance360 theme */
+@layer utilities {
+
+    /* Text colors */
+    .text-primary {
+        color: rgb(var(--primary));
+    }
+
+    /* Background colors */
+    .bg-primary {
+        background-color: rgb(var(--primary));
+    }
+
+    .bg-dark {
+        background-color: rgb(var(--background-dark));
+    }
+
+    /* Professional card style */
+    .card {
+        @apply bg-white rounded-lg shadow-sm border border-gray-100 transition-shadow hover:shadow-md;
+    }
+
+    /* Clean button styles */
+    .btn-primary {
+        @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors;
+    }
+
+    .btn-secondary {
+        @apply bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium py-2 px-4 rounded-md transition-colors;
+    }
+
+    .btn-ghost {
+        @apply hover:bg-gray-100 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors;
+    }
+
+    /* Minimal input style */
+    .input {
+        @apply border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors;
+    }
+
+    /* Clean metric card */
+    .metric-card {
+        @apply bg-white p-6 rounded-lg border border-gray-100 hover:shadow-sm transition-all;
+    }
+
+    /* Professional gradient text */
+    .gradient-text {
+        @apply bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent;
+    }
+}
+
+/* Remove excessive animations and color transitions */
+/* REMOVED: Global transition on all elements causes Safari repaint issues */
+/* Instead, apply transitions only where needed via Tailwind classes */
+
+/* Scrollbar styling for professional look */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgb(var(--background-secondary));
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgb(var(--text-muted));
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--text-secondary));
+}
+
+/* Hide scrollbar for specific elements */
+.scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+    display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Finance360 Brand Utility Classes - Accenture Branding */
+.bg-navy {
+    background: rgb(var(--primary-navy));
+}
+
+.bg-navy-gradient {
+    background: linear-gradient(135deg, rgb(var(--primary-navy)) 0%, rgb(var(--primary-navy-light)) 100%);
+}
+
+.bg-cyan-gradient {
+    /* Legacy class - now uses Accenture Purple */
+    background: linear-gradient(135deg, rgb(var(--primary-purple)) 0%, rgb(var(--primary-purple-dark)) 100%);
+}
+
+.bg-purple-gradient {
+    background: linear-gradient(135deg, #A100FF 0%, #7500C0 100%);
+}
+
+.text-cyan {
+    /* Legacy class - now uses Accenture Purple */
+    color: rgb(var(--primary-purple));
+}
+
+.text-purple {
+    color: rgb(var(--secondary-purple));
+}
+
+.text-magenta {
+    color: rgb(var(--secondary-danger));
+}
+
+.border-cyan {
+    /* Legacy class - now uses Accenture Purple */
+    border-color: rgba(var(--primary-purple) / 0.2);
+}
+
+.border-purple {
+    border-color: rgba(var(--primary-purple) / 0.2);
+}
+
+.glow-cyan {
+    /* Legacy class - now uses Accenture Purple */
+    box-shadow: var(--glow-purple);
+}
+
+.glow-cyan-hover:hover {
+    box-shadow: var(--glow-purple);
+}
+
+.glow-purple {
+    box-shadow: var(--glow-purple);
+}
+
+.glow-purple-intense {
+    box-shadow: var(--glow-purple-intense);
+}
+
+/* Additional utility classes for components */
+.text-navy-900 {
+    color: rgb(var(--primary-navy));
+}
+
+.border-cyan-500 {
+    /* Legacy class - now uses Accenture Purple */
+    border-color: rgb(var(--primary-purple));
+}
+
+.border-purple-500 {
+    border-color: rgb(var(--primary-purple));
+}
+
+.bg-cyan-50 {
+    /* Legacy class - now uses Accenture Purple */
+    background-color: rgba(var(--primary-purple) / 0.05);
+}
+
+.bg-purple-50 {
+    background-color: rgba(var(--primary-purple) / 0.05);
+}
+
+/* Animation delays for login page */
+.delay-100 {
+    animation-delay: 100ms;
+}
+
+.delay-200 {
+    animation-delay: 200ms;
+}
+
+.delay-300 {
+    animation-delay: 300ms;
+}
+
+/* Safari-optimized pulse animation using transform instead of opacity */
+@keyframes safari-pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+.animate-safari-pulse {
+    animation: safari-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    /* Force GPU acceleration for smoother animation in Safari */
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    will-change: transform;
+}
+
+/* Safari-specific optimizations to prevent pulsing/flickering */
+@supports (-webkit-backdrop-filter: none) or (backdrop-filter: none) {
+    /* Optimize backdrop-blur for Safari - reduce blur amount for better performance */
+    .backdrop-blur-sm {
+        -webkit-backdrop-filter: blur(4px);
+        backdrop-filter: blur(4px);
+    }
+    
+    .backdrop-blur {
+        -webkit-backdrop-filter: blur(8px);
+        backdrop-filter: blur(8px);
+    }
+    
+    .backdrop-blur-lg {
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+    }
+}
+
+/* Force GPU acceleration for fixed position elements in Safari */
+.fixed {
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+}
+
+/* Optimize font rendering for Safari */
+@media not all and (min-resolution:.001dpcm) {
+    @supports (-webkit-appearance:none) {
+        /* Safari-specific: Optimize font rendering only */
+        body {
+            -webkit-font-smoothing: subpixel-antialiased;
+            -moz-osx-font-smoothing: auto;
+        }
+    }
+}
