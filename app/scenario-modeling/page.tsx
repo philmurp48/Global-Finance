@@ -251,7 +251,9 @@ export default function ScenarioModelingPage() {
                         minValue: lever.minValue || 0,
                         maxValue: lever.maxValue || 0,
                         unit: lever.unit || '$',
-                        impact: lever.impact || 'low'
+                        impact: (lever.impact === 'high' || lever.impact === 'medium' || lever.impact === 'low') 
+                            ? lever.impact 
+                            : 'low' as 'high' | 'medium' | 'low'
                     }));
                 }
             }

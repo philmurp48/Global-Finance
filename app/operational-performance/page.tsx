@@ -16,15 +16,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { ExcelDriverTreeData } from '@/lib/excel-parser';
 import { extractOperationalMetrics } from '@/lib/excel-metrics';
 
-interface OperationalPerformanceProps {
-    filters?: {
-        selectedPeriod: string;
-        selectedComparison: string;
-    };
-}
-
-export default function OperationalPerformance({ filters }: OperationalPerformanceProps) {
-    const { selectedPeriod = 'November 2024', selectedComparison = 'vs Plan' } = filters || {};
+export default function OperationalPerformance() {
+    const selectedPeriod = 'November 2024';
+    const selectedComparison = 'vs Plan';
     const [excelData, setExcelData] = useState<ExcelDriverTreeData | null>(null);
 
     // Load Excel data on mount
