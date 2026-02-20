@@ -1005,8 +1005,11 @@ export default function HomePage() {
     }, [excelMetrics]);
 
     const handleInsightClick = (insight: any) => {
-        setSelectedInsight(insight);
-        setShowModal(true);
+        // Navigate to Operational Performance page with field name as query parameter
+        if (insight.id) {
+            // The insight.id is the fieldName (e.g., 'AvgAUM_$mm', 'Headcount FTE')
+            router.push(`/operational-performance?field=${encodeURIComponent(insight.id)}`);
+        }
     };
 
     const handleViewConsole = () => {

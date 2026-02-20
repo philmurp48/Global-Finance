@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
     TrendingUp,
     TrendingDown, 
@@ -32,11 +33,13 @@ interface PnLData {
 }
 
 export default function OperationalPerformance() {
+    const searchParams = useSearchParams();
     const [excelData, setExcelData] = useState<ExcelDriverTreeData | null>(null);
     const [selectedDimensions, setSelectedDimensions] = useState<string[]>(['Geography']); // Default to Geography
     const [availableDimensions, setAvailableDimensions] = useState<string[]>([]);
     const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set()); // Track expanded sections
+    const [hasScrolledToField, setHasScrolledToField] = useState(false);
 
     // Load Excel data on mount
     useEffect(() => {
@@ -478,6 +481,75 @@ export default function OperationalPerformance() {
         
         return items;
     }, [excelData]);
+
+    // Handle scrolling to field from query parameter (must be after pnlLineItems is defined)
+    useEffect(() => {
+        const fieldParam = searchParams.get('field');
+        if (fieldParam && pnlLineItems.length > 0 && !hasScrolledToField) {
+            const fieldName = decodeURIComponent(fieldParam);
+            
+            // Normalize field name for matching (remove special chars, spaces, units)
+            const normalizeFieldName = (name: string) => {
+                return name.toLowerCase()
+                    .replace(/\$mm/g, '')
+                    .replace(/\$m(?![a-z])/g, '')
+                    .replace(/mm(?![a-z])/g, '')
+                    .replace(/_bps/g, '')
+                    .replace(/_pct/g, '')
+                    .replace(/_fte/g, '')
+                    .replace(/[^a-z0-9]/g, '')
+                    .trim();
+            };
+            
+            const targetNormalized = normalizeFieldName(fieldName);
+            
+            // Find the field in pnlLineItems to determine which section it belongs to
+            const fieldItem = pnlLineItems.find(item => {
+                if (!item.fieldName) return false;
+                const itemFieldNormalized = normalizeFieldName(item.fieldName);
+                return itemFieldNormalized === targetNormalized || 
+                       itemFieldNormalized.includes(targetNormalized) ||
+                       targetNormalized.includes(itemFieldNormalized);
+            });
+            
+            if (fieldItem && fieldItem.fieldName) {
+                // Determine which section this field belongs to
+                const fieldNameLower = fieldItem.fieldName.toLowerCase();
+                let sectionToExpand: string | null = null;
+                
+                if (fieldNameLower.includes('revenue') || fieldNameLower.includes('advisory') || 
+                    fieldNameLower.includes('transaction') || fieldNameLower.includes('aum') ||
+                    fieldNameLower.includes('netflows') || fieldNameLower.includes('marketreturn') ||
+                    fieldNameLower.includes('tradingvolume')) {
+                    sectionToExpand = 'Revenue';
+                } else if (fieldNameLower.includes('expense') || fieldNameLower.includes('compensation') ||
+                           fieldNameLower.includes('acquisition') || fieldNameLower.includes('application') ||
+                           fieldNameLower.includes('headcount') || fieldNameLower.includes('fte')) {
+                    sectionToExpand = 'Expenses';
+                }
+                
+                // Expand the section if needed
+                if (sectionToExpand && !expandedSections.has(sectionToExpand)) {
+                    setExpandedSections(prev => new Set([...prev, sectionToExpand!]));
+                }
+                
+                // Wait a bit for the DOM to update, then scroll
+                setTimeout(() => {
+                    const elementId = `field-${fieldItem.fieldName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                    const element = document.getElementById(elementId);
+                    if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Highlight the row briefly
+                        element.classList.add('bg-yellow-100');
+                        setTimeout(() => {
+                            element.classList.remove('bg-yellow-100');
+                        }, 2000);
+                        setHasScrolledToField(true);
+                    }
+                }, 500);
+            }
+        }
+    }, [searchParams, pnlLineItems, expandedSections, hasScrolledToField]);
 
     // Calculate P&L data based on selected dimensions and available periods (quarters)
     const pnlData = useMemo(() => {
@@ -1180,10 +1252,16 @@ export default function OperationalPerformance() {
                                             // Use section header label if combined, otherwise use item label
                                             const displayLabel = isCombinedWithHeader ? item.sectionHeader!.label : item.label;
                                             
+                                            // Create a unique ID for this row based on fieldName for scrolling
+                                            const rowId = item.fieldName 
+                                                ? `field-${item.fieldName.replace(/[^a-zA-Z0-9]/g, '-')}`
+                                                : `row-${rowKey}-${item.label}-${idx}`;
+                                            
                                             return (
                                                 <tr 
+                                                    id={rowId}
                                                     key={`${rowKey}-${item.label}-${idx}`}
-                                                    className={`hover:bg-gray-50 ${
+                                                    className={`hover:bg-gray-50 transition-colors ${
                                                         item.isTotal || item.isMargin ? 'bg-gray-50 font-semibold border-t border-gray-200' : ''
                                                     }`}
                                                 >
