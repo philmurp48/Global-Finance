@@ -1405,7 +1405,7 @@ export default function HomePage() {
                         
                         // Look for cost center in dimension tables
                         for (const [dimName, dimTable] of dimTables.entries()) {
-                            const table = dimTable instanceof Map ? dimTable : new Map(Object.entries(dimTable));
+                            const table = dimTable instanceof Map ? dimTable : new Map(Object.entries(dimTable as Record<string, unknown>));
                             const dimRecord = table.get(costCenterId);
                             if (dimRecord) {
                                 costCenterName = dimRecord.name || dimRecord.Name || dimRecord.CostCenter || costCenterId;
@@ -1727,10 +1727,10 @@ export default function HomePage() {
 
             Object.keys(geoVariations).forEach(standardName => {
                 geoVariations[standardName].forEach(variant => {
-                    if (values.some(v => variant.includes(v) || v.includes(variant))) {
+                    if (values.some((v: string) => variant.includes(v) || v.includes(variant))) {
                         // Try to find matching IDs
                         Object.keys(valueToIdMap).forEach(dimName => {
-                            if (geoVariations[standardName].some(v => dimName.includes(v) || v.includes(dimName))) {
+                            if (geoVariations[standardName].some((v: string) => dimName.includes(v) || v.includes(dimName))) {
                                 if (!valueToIdMap[standardName]) valueToIdMap[standardName] = [];
                                 valueToIdMap[standardName].push(...valueToIdMap[dimName]);
                             }
@@ -1751,7 +1751,7 @@ export default function HomePage() {
             recordCount: number;
         } } = {};
 
-        values.forEach(value => {
+        values.forEach((value: string) => {
             valueResults[value] = {
                 value,
                 measureValue: 0,
@@ -1773,7 +1773,7 @@ export default function HomePage() {
                 if (valueToIdMap[dimValue].includes(recordId)) {
                     // Check if this dimension value matches any of our comparison values
                     const valueLower = dimValue.toLowerCase();
-                    values.forEach(queryValue => {
+                    values.forEach((queryValue: string) => {
                         if (valueLower.includes(queryValue) || queryValue.includes(valueLower) || 
                             dimValue.toLowerCase() === queryValue.toLowerCase()) {
                             matchedValue = queryValue;
@@ -1788,7 +1788,7 @@ export default function HomePage() {
                 Object.keys(record).forEach(key => {
                     if (key.toLowerCase().includes('geography') || key.toLowerCase().includes('region')) {
                         const recordValue = String(record[key] || '').toLowerCase();
-                        values.forEach(queryValue => {
+                        values.forEach((queryValue: string) => {
                             if (recordValue.includes(queryValue) || queryValue.includes(recordValue)) {
                                 matchedValue = queryValue;
                             }
@@ -1941,8 +1941,8 @@ export default function HomePage() {
             'lineofbusiness': { idField: 'LOBID', dimTable: 'Dim_LineOfBusiness', nameField: 'LineOfBusiness' },
             'legalentity': { idField: 'LegalEntityID', dimTable: 'Dim_LegalEntity', nameField: 'LegalEntity' },
             'producttype': { idField: 'ProductTypeID', dimTable: 'Dim_ProductType', nameField: 'ProductType' },
-            'quarter': { idField: 'Quarter', dimTable: null, nameField: 'Quarter' },
-            'scenario': { idField: 'Scenario', dimTable: null, nameField: 'Scenario' }
+            'quarter': { idField: 'Quarter', dimTable: null as any, nameField: 'Quarter' },
+            'scenario': { idField: 'Scenario', dimTable: null as any, nameField: 'Scenario' }
         };
 
         // Detect measure field from query

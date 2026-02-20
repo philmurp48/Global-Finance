@@ -425,9 +425,15 @@ export default function OperationalPerformance() {
             items.push(...filteredExpenseItems);
             
             // Then add compensation hierarchy if it exists (alongside other expenses)
-            if (totalCompensationItem) {
+            if (totalCompensationItem !== null) {
+                const compensationItem: PnLLineItem = totalCompensationItem;
                 // Add TotalCompensation_$mm with indent 1 (same level as other expenses)
-                items.push({ ...totalCompensationItem, indent: 1 });
+                items.push({
+                    label: compensationItem.label,
+                    fieldName: compensationItem.fieldName,
+                    isTotal: compensationItem.isTotal,
+                    indent: 1
+                });
                 
                 // Add nested compensation items with indent 2 (under Total Compensation)
                 let baseComp: PnLLineItem | undefined;
@@ -443,10 +449,20 @@ export default function OperationalPerformance() {
                 }
                 
                 if (baseComp) {
-                    items.push({ ...baseComp, indent: 2 });
+                    items.push({
+                        label: baseComp.label,
+                        fieldName: baseComp.fieldName,
+                        isTotal: baseComp.isTotal,
+                        indent: 2
+                    });
                 }
                 if (varComp) {
-                    items.push({ ...varComp, indent: 2 });
+                    items.push({
+                        label: varComp.label,
+                        fieldName: varComp.fieldName,
+                        isTotal: varComp.isTotal,
+                        indent: 2
+                    });
                 }
             }
         }

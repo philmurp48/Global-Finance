@@ -867,7 +867,7 @@ export default function ScenarioModelingPage() {
                     if (!record) return;
                     
                     const leverValue = getFieldValue(record, leverFieldName);
-                    const fieldValue = getFieldValue(record, matchedField);
+                    const fieldValue = getFieldValue(record, matchedField!);
                     
                     if (leverValue !== null && !isNaN(leverValue) && leverValue !== 0 &&
                         fieldValue !== null && !isNaN(fieldValue) && fieldValue !== 0) {
