@@ -279,9 +279,12 @@ function parseDriverTreeSheet(sheet: any, XLSX: any): DriverTreeNode[] {
 
         let parentNode: DriverTreeNode | null = null;
 
-        // Process each level from 1 to 4
+        // Process each level from 0 to 5
         for (let colIdx = 0; colIdx < levelColumns.length; colIdx++) {
             const { index: colIndex, level } = levelColumns[colIdx];
+            // Support levels 0-5
+            if (level < 0 || level > 5) continue;
+            
             const cellValue = row[colIndex];
             
             if (!cellValue || !String(cellValue).trim()) {

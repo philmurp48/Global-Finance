@@ -202,7 +202,7 @@ export default function ScenarioModelingPage() {
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
     const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
     
-    // Expand to Level 2 by default
+    // Expand to Level 2 by default (levels 0, 1, and 2)
     useEffect(() => {
         if (excelData && excelData.tree && excelData.tree.length > 0) {
             const expanded = new Set<string>();
@@ -212,18 +212,20 @@ export default function ScenarioModelingPage() {
                         ? `${parentIndex}-${node.id}` 
                         : `root-${rootIndex}-${node.id}`;
                     
-                    // Expand if level is 1 or 2
-                    if (node.level && node.level <= 2) {
+                    // Expand if level is 0, 1, or 2 (up to and including Level 2)
+                    if (node.level !== undefined && node.level <= 2) {
                         expanded.add(nodeIndex);
-                    }
-                    
-                    if (node.children && node.children.length > 0) {
-                        expandToLevel2(node.children, nodeIndex, rootIndex);
+                        
+                        // Continue expanding children if we're at Level 0 or 1 (not Level 2)
+                        if (node.children && node.children.length > 0 && node.level < 2) {
+                            expandToLevel2(node.children, nodeIndex, rootIndex);
+                        }
                     }
                 });
             };
             excelData.tree.forEach((rootNode, rootIndex) => expandToLevel2([rootNode], '', rootIndex));
             setExpandedDrivers(expanded);
+            console.log('Expanded drivers to Level 2:', expanded.size, 'nodes');
         }
     }, [excelData]);
     
@@ -261,31 +263,6 @@ export default function ScenarioModelingPage() {
 
         loadData();
     }, []);
-
-    // Expand to Level 2 by default
-    useEffect(() => {
-        if (excelData && excelData.tree && excelData.tree.length > 0) {
-            const expanded = new Set<string>();
-            const expandToLevel2 = (nodes: DriverTreeNode[], parentIndex: string = '', rootIndex: number = 0) => {
-                nodes.forEach((node, index) => {
-                    const nodeIndex = parentIndex 
-                        ? `${parentIndex}-${node.id}` 
-                        : `root-${rootIndex}-${node.id}`;
-                    
-                    // Expand if level is 1 or 2
-                    if (node.level && node.level <= 2) {
-                        expanded.add(nodeIndex);
-                    }
-                    
-                    if (node.children && node.children.length > 0) {
-                        expandToLevel2(node.children, nodeIndex, rootIndex);
-                    }
-                });
-            };
-            excelData.tree.forEach((rootNode, rootIndex) => expandToLevel2([rootNode], '', rootIndex));
-            setExpandedDrivers(expanded);
-        }
-    }, [excelData]);
 
     // Extract available periods from Fact_Margin Quarter field
     useEffect(() => {
@@ -576,11 +553,30 @@ export default function ScenarioModelingPage() {
                 }
             });
             
-            // Aggregate Margin_$mm and MarginPct
-            const marginValue = getFieldValue(record, 'Margin_$mm');
+            // Aggregate Margin_$mm and MarginPct - try multiple field name variations
+            let marginValue = getFieldValue(record, 'Margin_$mm');
+            if (marginValue === null || isNaN(marginValue)) {
+                marginValue = getFieldValue(record, 'Margin_$MM');
+            }
+            if (marginValue === null || isNaN(marginValue)) {
+                marginValue = getFieldValue(record, 'Margin $mm');
+            }
+            if (marginValue === null || isNaN(marginValue)) {
+                marginValue = getFieldValue(record, 'Margin $MM');
+            }
             if (marginValue !== null && !isNaN(marginValue)) {
                 if (data[period]['Margin_$mm'] === undefined) data[period]['Margin_$mm'] = 0;
                 data[period]['Margin_$mm'] += marginValue;
+            } else {
+                // Debug: log available keys if Margin_$mm not found
+                const recordKeys = Object.keys(record).filter(k => 
+                    k.toLowerCase().includes('margin') && 
+                    !k.toLowerCase().includes('pct') && 
+                    !k.toLowerCase().includes('%')
+                );
+                if (recordKeys.length > 0 && period === Object.keys(data)[0]) {
+                    console.log('Margin field search - Available margin-related keys:', recordKeys);
+                }
             }
             
             const marginPctValue = getFieldValue(record, 'MarginPct') || getFieldValue(record, 'Margin_%');
@@ -615,6 +611,13 @@ export default function ScenarioModelingPage() {
             }
         });
 
+        // Debug: Log Margin_$mm values for first period
+        const firstPeriod = Object.keys(data)[0];
+        if (firstPeriod) {
+            console.log('basePnLData Margin_$mm for', firstPeriod, ':', data[firstPeriod]['Margin_$mm']);
+            console.log('basePnLData Margin for', firstPeriod, ':', data[firstPeriod]['Margin']);
+            console.log('basePnLData MarginPct for', firstPeriod, ':', data[firstPeriod]['MarginPct']);
+        }
         console.log('basePnLData calculated:', Object.keys(data).length, 'periods');
         return data;
     }, [excelData, pnlLineItems]);
@@ -1094,11 +1097,13 @@ export default function ScenarioModelingPage() {
             
             // Calculate the impact on margin from revenue and expense impacts
             const marginImpact = revenueImpact - expenseImpact;
-            data[period]['Margin'] = baseMargin + marginImpact;
+            const finalMargin = baseMargin + marginImpact;
+            data[period]['Margin'] = finalMargin;
+            data[period]['Margin_$mm'] = finalMargin; // Also set Margin_$mm for consistency
             
             // MarginPct should be recalculated based on new margin and revenue
             const finalTotalRevenue = data[period]['TotalRevenue_$mm'] || 0;
-            data[period]['MarginPct'] = finalTotalRevenue !== 0 ? (data[period]['Margin'] / finalTotalRevenue) * 100 : 0;
+            data[period]['MarginPct'] = finalTotalRevenue !== 0 ? (finalMargin / finalTotalRevenue) * 100 : 0;
         });
 
         return data;
@@ -1296,6 +1301,7 @@ export default function ScenarioModelingPage() {
     };
 
     // Calculate base driver tree amounts from Fact_Margin for selected periods
+    // All values sourced directly from Fact_Margin - NO calculations
     const baseDriverTreeData = useMemo(() => {
         if (!excelData || !excelData.tree || excelData.tree.length === 0 || !excelData.factMarginRecords) {
             return new Map<string, Map<string, number>>(); // Map of nodeId -> Map of period -> amount
@@ -1305,30 +1311,8 @@ export default function ScenarioModelingPage() {
         const periodsToProcess = selectedPeriods.length > 0 ? selectedPeriods : availablePeriods;
 
         if (periodsToProcess.length === 0) {
-            console.warn('No periods to process for driver tree', {
-                selectedPeriods,
-                availablePeriods,
-                factMarginRecordCount: excelData.factMarginRecords?.length || 0
-            });
             return data;
         }
-
-        // Extract Level 4 driver names from tree
-        const extractLevel4Names = (nodes: DriverTreeNode[]): string[] => {
-            const names: string[] = [];
-            const traverse = (node: DriverTreeNode) => {
-                if (node.level === 4) {
-                    names.push(node.name);
-                }
-                if (node.children) {
-                    node.children.forEach(child => traverse(child));
-                }
-            };
-            nodes.forEach(node => traverse(node));
-            return names;
-        };
-
-        const level4Names = extractLevel4Names(excelData.tree);
 
         // Initialize all nodes
         const initializeNode = (node: DriverTreeNode) => {
@@ -1341,7 +1325,7 @@ export default function ScenarioModelingPage() {
         };
         excelData.tree.forEach(node => initializeNode(node));
 
-        // Aggregate Level 4 amounts from Fact_Margin for each period
+        // Source amounts directly from Fact_Margin for each node by matching node name to Fact_Margin field
         periodsToProcess.forEach(period => {
             excelData.factMarginRecords.forEach(record => {
                 if (!record) return;
@@ -1353,151 +1337,32 @@ export default function ScenarioModelingPage() {
                 if (!quarterKey) return;
                 
                 const quarter = String(record[quarterKey] || '').trim();
-                // Normalize both for comparison (trim whitespace, case-insensitive)
-                const normalizedQuarter = quarter.trim();
                 const normalizedPeriod = String(period).trim();
-                if (!quarter || normalizedQuarter !== normalizedPeriod) {
-                    // Skip records that don't match the current period
+                if (!quarter || quarter.trim() !== normalizedPeriod) {
                     return;
                 }
 
-                // For each Level 4 driver, get the amount using fuzzy matching
-                level4Names.forEach(driverName => {
-                    // Use the same fuzzy matching logic as getFieldValue
-                    // This handles cases where driver name might be "TradingVolume_$mm" and Fact_Margin has "TradingVolume_$mm"
-                    const amount = getFieldValue(record, driverName);
+                // For each node in the tree, try to find matching field in Fact_Margin
+                const processNode = (node: DriverTreeNode) => {
+                    // Use getFieldValue to find the value for this node's name in Fact_Margin
+                    const amount = getFieldValue(record, node.name);
                     if (amount !== null && !isNaN(amount)) {
-                        // Find the Level 4 node with this name using fuzzy matching
-                        const findNode = (nodes: DriverTreeNode[]): DriverTreeNode | null => {
-                            for (const node of nodes) {
-                                if (node.level === 4) {
-                                    // Use fuzzy matching to find the node
-                                    const nodeNameLower = node.name.toLowerCase().trim();
-                                    const driverNameLower = driverName.toLowerCase().trim();
-                                    
-                                    // Try exact match first
-                                    if (nodeNameLower === driverNameLower) {
-                                        return node;
-                                    }
-                                    
-                                    // Try partial match
-                                    if (nodeNameLower.includes(driverNameLower) || driverNameLower.includes(nodeNameLower)) {
-                                        return node;
-                                    }
-                                    
-                                    // Try normalized match (remove special chars, units)
-                                    const normalize = (str: string) => str.replace(/[^a-z0-9]/g, '').toLowerCase();
-                                    if (normalize(nodeNameLower) === normalize(driverNameLower)) {
-                                        return node;
-                                    }
-                                }
-                                if (node.children) {
-                                    const found = findNode(node.children);
-                                    if (found) return found;
-                                }
-                            }
-                            return null;
-                        };
-
-                        const level4Node = findNode(excelData.tree);
-                        if (level4Node) {
-                            const nodeData = data.get(level4Node.id);
-                            if (nodeData) {
-                                // Ensure period is normalized (trimmed string) for consistent key matching
-                                const normalizedPeriod = String(period).trim();
-                                const currentAmount = nodeData.get(normalizedPeriod) || 0;
-                                nodeData.set(normalizedPeriod, currentAmount + amount);
-                            }
+                        const nodeData = data.get(node.id);
+                        if (nodeData) {
+                            const currentAmount = nodeData.get(normalizedPeriod) || 0;
+                            nodeData.set(normalizedPeriod, currentAmount + amount);
                         }
                     }
-                });
+                    
+                    // Process children recursively
+                    if (node.children) {
+                        node.children.forEach(child => processNode(child));
+                    }
+                };
+
+                excelData.tree.forEach(rootNode => processNode(rootNode));
             });
         });
-        
-        // Debug logging
-        if (periodsToProcess.length > 0 && level4Names.length > 0 && excelData.factMarginRecords.length > 0) {
-            console.log('Driver Tree Calculation Debug:', {
-                periodsToProcess,
-                level4Names: level4Names.slice(0, 5), // First 5 for debugging
-                recordCount: excelData.factMarginRecords.length,
-                firstRecordKeys: Object.keys(excelData.factMarginRecords[0] || {}).slice(0, 10)
-            });
-            
-            // Check if we found any amounts
-            let totalAmounts = 0;
-            let sampleAmounts: Array<{nodeId: string, period: string, amount: number}> = [];
-            data.forEach((periodData, nodeId) => {
-                periodData.forEach((amount, period) => {
-                    if (amount !== 0) {
-                        totalAmounts++;
-                        if (sampleAmounts.length < 10) {
-                            sampleAmounts.push({nodeId, period, amount});
-                        }
-                    }
-                });
-            });
-            console.log('Total non-zero amounts found:', totalAmounts);
-            if (sampleAmounts.length > 0) {
-                console.log('Sample amounts (first 10):', sampleAmounts);
-                
-                // Also show what's in the first Level 1 node
-                const firstRootNode = excelData.tree[0];
-                if (firstRootNode) {
-                    const rootNodeData = data.get(firstRootNode.id);
-                    if (rootNodeData) {
-                        console.log('First root node data:', {
-                            nodeId: firstRootNode.id,
-                            nodeName: firstRootNode.name,
-                            entries: Array.from(rootNodeData.entries())
-                        });
-                    }
-                }
-            } else {
-                console.warn('No amounts found! Checking first record...');
-                const firstRecord = excelData.factMarginRecords[0];
-                if (firstRecord) {
-                    const quarterKey = Object.keys(firstRecord).find(key => key.toLowerCase() === 'quarter');
-                    console.log('First record quarter:', quarterKey ? firstRecord[quarterKey] : 'not found');
-                    console.log('First record sample fields:', Object.keys(firstRecord).filter(k => 
-                        !k.toLowerCase().includes('id') && 
-                        !k.toLowerCase().includes('quarter') &&
-                        !k.toLowerCase().includes('period')
-                    ).slice(0, 10));
-                    
-                    // Try to match first level4 name
-                    if (level4Names.length > 0) {
-                        const testDriver = level4Names[0];
-                        const testAmount = getFieldValue(firstRecord, testDriver);
-                        console.log(`Test match for "${testDriver}":`, testAmount);
-                    }
-                }
-            }
-        }
-
-        // Roll up from Level 4 to Level 3 to Level 2 to Level 1
-        const rollUpAmounts = (node: DriverTreeNode) => {
-            const nodePeriodData = data.get(node.id) || new Map<string, number>();
-
-            if (node.children && node.children.length > 0) {
-                node.children.forEach(child => {
-                    rollUpAmounts(child);
-                    const childData = data.get(child.id);
-                    if (childData) {
-                        periodsToProcess.forEach(period => {
-                            // Normalize period for consistent key matching
-                            const normalizedPeriod = String(period).trim();
-                            const childAmount = childData.get(normalizedPeriod) || 0;
-                            const currentAmount = nodePeriodData.get(normalizedPeriod) || 0;
-                            nodePeriodData.set(normalizedPeriod, currentAmount + childAmount);
-                        });
-                    }
-                });
-            }
-
-            data.set(node.id, nodePeriodData);
-        };
-
-        excelData.tree.forEach(node => rollUpAmounts(node));
 
         return data;
     }, [excelData, selectedPeriods, availablePeriods]);
@@ -1516,55 +1381,80 @@ export default function ScenarioModelingPage() {
             data.set(nodeId, new Map(periodData));
         });
 
-        // Define levers for matching (using Fact_Margin field names)
-        const levers = [
-            { id: 'AUM', factMarginFieldName: 'AUM_$mm' },
-            { id: 'TxnFeeRate', factMarginFieldName: 'TxnFeeRate_bps' },
-            { id: 'TradingVolume', factMarginFieldName: 'TradingVolume_$mm' },
-            { id: 'Headcount_FTE', factMarginFieldName: 'Headcount_FTE' }
-        ];
-
-        // Apply lever impacts directly to Level 4 nodes that match the lever's Fact_Margin field name
-        // Each lever directly affects its corresponding driver field (e.g., AUM slider affects AUM_$mm)
+        // Apply lever impacts using the same mapping as P&L Impact
+        // Use leverToFieldMapping to find which fields are impacted by each lever
         const applyLeverImpacts = (nodes: DriverTreeNode[]) => {
+            const normalizeFieldName = (name: string): string => {
+                return name.toLowerCase().trim().replace(/[_\s-]/g, '');
+            };
+
             nodes.forEach(node => {
-                if (node.level === 4) {
-                    const nodeNameLower = node.name.toLowerCase().trim();
-                    const normalize = (str: string) => str.replace(/[^a-z0-9]/g, '').toLowerCase();
-                    const nodeNameNormalized = normalize(nodeNameLower);
+                // Process all levels (0-5), not just Level 4
+                const nodeNameLower = node.name.toLowerCase().trim();
+                const nodeNameNormalized = normalizeFieldName(node.name);
+                
+                // Check each lever and its impacted fields
+                Object.keys(leverToFieldMapping).forEach(leverName => {
+                    const leverId = leverName === 'Avg AUM' ? 'AvgAUM' :
+                                   leverName === 'Trading Volume' ? 'TradingVolume' :
+                                   leverName === 'Headcount FTE' ? 'HeadcountFTE' :
+                                   leverName === 'Acquisition Cost Per Client' ? 'AcquisitionCostPerClient' : '';
                     
-                    // Check each lever and apply impact if this Level 4 node matches the lever's Fact_Margin field
-                    levers.forEach(lever => {
-                        const factMarginFieldLower = lever.factMarginFieldName.toLowerCase().trim();
-                        const factMarginFieldNormalized = normalize(factMarginFieldLower);
-                        
-                        // Check if this Level 4 node matches the lever's Fact_Margin field name
-                        const matches = 
-                            nodeNameLower === factMarginFieldLower ||
-                            nodeNameLower.includes(factMarginFieldLower) ||
-                            factMarginFieldLower.includes(nodeNameLower) ||
-                            nodeNameNormalized === factMarginFieldNormalized ||
-                            nodeNameNormalized.includes(factMarginFieldNormalized) ||
-                            factMarginFieldNormalized.includes(nodeNameNormalized);
-                        
-                        if (matches) {
-                            const leverChange = leverValues[lever.id] || 0;
-                            if (leverChange !== 0) {
-                                periodsToProcess.forEach(period => {
-                                    const nodeData = data.get(node.id);
-                                    if (nodeData) {
-                                        // Normalize period for consistent key matching
-                                        const normalizedPeriod = String(period).trim();
-                                        const baseAmount = nodeData.get(normalizedPeriod) || 0;
-                                        // Apply percentage change directly to the driver value
-                                        const impact = baseAmount * (leverChange / 100);
-                                        nodeData.set(normalizedPeriod, baseAmount + impact);
-                                    }
-                                });
+                    if (!leverId) return;
+                    
+                    const leverChange = leverValues[leverId] || 0;
+                    if (leverChange === 0) return;
+                    
+                    // Get impacted fields for this lever
+                    const impactedFields = leverToFieldMapping[leverName] || [];
+                    
+                    // Check if this node is the lever field itself (e.g., "Avg AUM")
+                    const leverFieldName = leverName; // Use lever name directly
+                    const leverFieldNormalized = normalizeFieldName(leverFieldName);
+                    const isLeverField = nodeNameNormalized === leverFieldNormalized ||
+                                        nodeNameNormalized.includes(leverFieldNormalized) ||
+                                        leverFieldNormalized.includes(nodeNameNormalized);
+                    
+                    // Check if this node matches any impacted field
+                    let isImpactedField = false;
+                    let impactPercent = 1.0; // Default impact
+                    
+                    for (const impactedField of impactedFields) {
+                        const impactedFieldNormalized = normalizeFieldName(impactedField);
+                        if (nodeNameNormalized === impactedFieldNormalized ||
+                            nodeNameNormalized.includes(impactedFieldNormalized) ||
+                            impactedFieldNormalized.includes(nodeNameNormalized)) {
+                            isImpactedField = true;
+                            // Get impact percentage from calculated impacts
+                            const impactKey = leverId as keyof typeof impactPercentages;
+                            if (impactPercentages[impactKey] && impactPercentages[impactKey][node.name]) {
+                                impactPercent = impactPercentages[impactKey][node.name];
                             }
+                            break;
                         }
-                    });
-                }
+                    }
+                    
+                    // Apply impact if this node is either the lever field or an impacted field
+                    if (isLeverField || isImpactedField) {
+                        periodsToProcess.forEach(period => {
+                            const nodeData = data.get(node.id);
+                            if (nodeData) {
+                                const normalizedPeriod = String(period).trim();
+                                const baseAmount = nodeData.get(normalizedPeriod) || 0;
+                                
+                                if (isLeverField) {
+                                    // Lever field changes directly by lever percentage
+                                    const impact = baseAmount * (leverChange / 100);
+                                    nodeData.set(normalizedPeriod, baseAmount + impact);
+                                } else if (isImpactedField) {
+                                    // Impacted field changes by lever percentage * impact percentage
+                                    const impact = baseAmount * (leverChange / 100) * impactPercent;
+                                    nodeData.set(normalizedPeriod, baseAmount + impact);
+                                }
+                            }
+                        });
+                    }
+                });
 
                 // Recursively process children
                 if (node.children) {
@@ -1575,49 +1465,33 @@ export default function ScenarioModelingPage() {
 
         applyLeverImpacts(excelData.tree);
 
-        // Re-roll up amounts after applying impacts
-        const rollUpAmounts = (node: DriverTreeNode) => {
-            // For Level 4 nodes, don't reset - they already have their values from base + impacts
-            if (node.level === 4) {
-                return;
-            }
-            
-            let finalNodeData = data.get(node.id);
-            if (!finalNodeData) {
-                finalNodeData = new Map<string, number>();
-                data.set(node.id, finalNodeData);
-            }
-            
-            // Reset to 0 for roll-up (only for parent nodes)
-            periodsToProcess.forEach(period => {
-                // Normalize period for consistent key matching
-                const normalizedPeriod = String(period).trim();
-                finalNodeData!.set(normalizedPeriod, 0);
-            });
-
-            if (node.children && node.children.length > 0) {
-                node.children.forEach(child => {
-                    rollUpAmounts(child);
-                    const childData = data.get(child.id);
-                    if (childData) {
-                        periodsToProcess.forEach(period => {
-                            // Normalize period for consistent key matching
-                            const normalizedPeriod = String(period).trim();
-                            const childAmount = childData.get(normalizedPeriod) || 0;
-                            const currentAmount = finalNodeData!.get(normalizedPeriod) || 0;
-                            finalNodeData!.set(normalizedPeriod, currentAmount + childAmount);
-                        });
-                    }
-                });
-            }
-        };
-
-        excelData.tree.forEach(node => rollUpAmounts(node));
+        // No roll-up needed - all values come directly from Fact_Margin
 
         return data;
-    }, [baseDriverTreeData, leverValues, excelData, selectedPeriods, availablePeriods]);
+    }, [baseDriverTreeData, leverValues, excelData, selectedPeriods, availablePeriods, leverToFieldMapping, impactPercentages]);
 
-    // Render driver tree node
+    // Helper to get change color (green for increase, red for decrease)
+    // For Operating Margin L0, start with black and only show color when there's a change
+    const getChangeColor = (baseValue: number, scenarioValue: number, isOperatingMarginL0: boolean = false): string => {
+        // Check if any levers have been moved (non-zero)
+        const hasLeverMovement = Object.values(leverValues).some(val => Math.abs(val) > 0.01);
+        
+        // For Operating Margin L0, if no levers moved, always show black
+        if (isOperatingMarginL0 && !hasLeverMovement) {
+            return 'text-gray-900';
+        }
+        
+        const diff = scenarioValue - baseValue;
+        // Use a more appropriate threshold based on value magnitude
+        const threshold = Math.abs(baseValue) > 1 ? Math.abs(baseValue) * 0.001 : 0.01;
+        if (Math.abs(diff) < threshold) {
+            // No significant change - black for Operating Margin L0, gray for others
+            return isOperatingMarginL0 ? 'text-gray-900' : 'text-gray-900';
+        }
+        return diff > 0 ? 'text-green-600' : 'text-red-600';
+    };
+
+    // Render driver tree node with improved styling
     const renderDriverNode = (node: DriverTreeNode, depth: number = 0, parentIndex: string = '', rootIndex: number = 0) => {
         const nodeIndex = parentIndex 
             ? `${parentIndex}-${node.id}` 
@@ -1629,95 +1503,95 @@ export default function ScenarioModelingPage() {
         const nodeData = scenarioDriverTreeData.get(node.id);
         const baseNodeData = baseDriverTreeData.get(node.id);
         
-        // Debug logging for first node
-        if (node.level === 1 && periodsToShow.length > 0) {
-            console.log('Rendering driver node:', {
-                nodeName: node.name,
-                nodeId: node.id,
-                periodsToShow,
-                hasNodeData: !!nodeData,
-                hasBaseNodeData: !!baseNodeData,
-                nodeDataSample: nodeData ? Array.from(nodeData.entries()).slice(0, 2) : null,
-                baseNodeDataSample: baseNodeData ? Array.from(baseNodeData.entries()).slice(0, 2) : null
-            });
-        }
+        // Determine background color based on level - using varying shades of blue
+        const getLevelColor = (level: number | undefined) => {
+            if (level === undefined) return 'bg-white border-gray-300';
+            if (level === 0) return 'bg-blue-50 border-blue-300';
+            if (level === 1) return 'bg-blue-100 border-blue-400';
+            if (level === 2) return 'bg-blue-200 border-blue-500';
+            if (level === 3) return 'bg-blue-300 border-blue-600';
+            if (level === 4) return 'bg-blue-400 border-blue-700';
+            if (level === 5) return 'bg-blue-500 border-blue-800';
+            return 'bg-white border-gray-300';
+        };
 
         return (
-            <div key={node.id} className="relative mb-1">
-                {depth > 0 && (
-                    <div className="absolute -left-4 top-3 w-4 h-0.5 bg-gray-300"></div>
-                )}
-                
+            <div key={node.id} className="mb-2">
                 <div 
-                    className="bg-gray-50 border border-gray-200 rounded p-3 shadow-sm hover:bg-gray-100 transition-colors"
-                    style={{ marginLeft: `${depth * 20}px` }}
+                    className={`${getLevelColor(node.level)} border-2 rounded-xl p-3 shadow-sm hover:shadow-md transition-all duration-200`}
+                    style={{ marginLeft: `${depth * 24}px` }}
                 >
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-2 flex-1 min-w-0">
+                    <div className="flex items-center w-full">
+                        <div className="flex items-center space-x-3 flex-shrink-0 min-w-[300px] max-w-[300px]">
                             {hasChildren ? (
                                 <button
                                     onClick={() => toggleDriver(nodeIndex)}
-                                    className="flex items-center justify-center w-5 h-5 hover:bg-gray-200 rounded transition-colors flex-shrink-0"
+                                    className="flex items-center justify-center w-6 h-6 hover:bg-white/50 rounded-lg transition-colors flex-shrink-0"
                                 >
                                     {isExpanded ? (
-                                        <ChevronDown className="w-4 h-4 text-gray-600" />
+                                        <ChevronDown className="w-5 h-5 text-gray-700" />
                                     ) : (
-                                        <ChevronRight className="w-4 h-4 text-gray-600" />
+                                        <ChevronRight className="w-5 h-5 text-gray-700" />
                                     )}
                                 </button>
                             ) : (
-                                <div className="w-5"></div>
+                                <div className="w-6 flex-shrink-0"></div>
                             )}
-                            <div className="flex-1 min-w-0">
-                                <span className="text-sm font-medium text-gray-900">
-                                    {getReportFieldName(node.name)}
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <span className="text-sm font-semibold text-gray-900 truncate">
+                                    {node.name}
                                 </span>
-                                {node.level && (
-                                    <span className="text-xs text-gray-400 ml-2">(L{node.level})</span>
+                                {node.level !== undefined && (
+                                    <span className="px-2 py-0.5 bg-white/70 text-gray-700 text-xs font-medium rounded-full flex-shrink-0">
+                                        L{node.level}
+                                    </span>
                                 )}
                             </div>
                         </div>
-                        <div className="flex items-center space-x-4 ml-4 flex-shrink-0">
+                        <div className="flex items-center gap-2 flex-1 justify-end overflow-x-auto">
                             {periodsToShow.length > 0 ? periodsToShow.map(period => {
-                                // Normalize period for consistent key matching
                                 const normalizedPeriod = String(period).trim();
-                                // Show scenario amount (with lever impacts applied)
                                 const scenarioAmount = nodeData?.get(normalizedPeriod) || 0;
+                                const baseAmount = baseNodeData?.get(normalizedPeriod) || 0;
                                 
-                                // Debug for first period of first node
-                                if (node.level === 1 && period === periodsToShow[0] && scenarioAmount === 0) {
-                                    const actualValue = nodeData?.get(period);
-                                    const allEntries = nodeData ? Array.from(nodeData.entries()) : [];
-                                    console.log('Zero amount detected:', {
-                                        nodeName: node.name,
-                                        nodeId: node.id,
-                                        period,
-                                        periodType: typeof period,
-                                        periodLength: period?.length,
-                                        hasNodeData: !!nodeData,
-                                        nodeDataKeys: nodeData ? Array.from(nodeData.keys()) : [],
-                                        nodeDataKeysTypes: nodeData ? Array.from(nodeData.keys()).map(k => ({key: k, type: typeof k, length: k?.length})) : [],
-                                        allEntries: allEntries.slice(0, 3),
-                                        actualValue,
-                                        actualValueType: typeof actualValue,
-                                        scenarioAmount
-                                    });
+                                // For Operating Margin L0, show both Margin_$MM and MarginPct
+                                const isOperatingMarginL0 = node.level === 0 && 
+                                    (node.name.toLowerCase().includes('operating margin') || 
+                                     node.name.toLowerCase().includes('margin'));
+                                
+                                if (isOperatingMarginL0) {
+                                    // Get Margin and MarginPct from scenarioPnLData
+                                    const periodData = scenarioPnLData[normalizedPeriod];
+                                    // Use Margin_$mm directly, fallback to Margin
+                                    const margin = periodData?.['Margin_$mm'] || periodData?.Margin || 0;
+                                    const marginPct = periodData?.MarginPct || 0;
+                                    const basePeriodData = basePnLData[normalizedPeriod];
+                                    // Use Margin_$mm directly, fallback to Margin
+                                    const baseMargin = basePeriodData?.['Margin_$mm'] || basePeriodData?.Margin || 0;
+                                    const baseMarginPct = basePeriodData?.MarginPct || 0;
                                     
-                                    // Try to find a match with different comparison
-                                    if (nodeData) {
-                                        const matchingKey = Array.from(nodeData.keys()).find(k => 
-                                            String(k).trim() === String(period).trim() ||
-                                            String(k).toLowerCase() === String(period).toLowerCase()
-                                        );
-                                        if (matchingKey) {
-                                            console.log('Found matching key:', matchingKey, 'value:', nodeData.get(matchingKey));
-                                        }
-                                    }
+                                    // Start with black, only show green/red when there's a change
+                                    const marginChangeColor = getChangeColor(baseMargin, margin, true);
+                                    const marginPctChangeColor = getChangeColor(baseMarginPct, marginPct, true);
+                                    
+                                    return (
+                                        <div key={period} className="text-right min-w-[110px] max-w-[110px] px-1.5 flex-shrink-0">
+                                            <div className={`text-sm font-bold whitespace-nowrap ${marginChangeColor}`}>
+                                                {formatCurrency(margin)}
+                                            </div>
+                                            <div className={`text-xs font-semibold whitespace-nowrap ${marginPctChangeColor}`}>
+                                                {formatPercentage(marginPct)}
+                                            </div>
+                                        </div>
+                                    );
                                 }
                                 
+                                // For other nodes, use normal change color logic
+                                const changeColor = getChangeColor(baseAmount, scenarioAmount, false);
+                                
                                 return (
-                                    <div key={period} className="text-right min-w-[100px]">
-                                        <div className="text-sm font-medium text-gray-900">
+                                    <div key={period} className="text-right min-w-[110px] max-w-[110px] px-1.5 flex-shrink-0">
+                                        <div className={`text-sm font-bold whitespace-nowrap ${changeColor}`}>
                                             {formatCurrency(scenarioAmount)}
                                         </div>
                                     </div>
@@ -1729,7 +1603,7 @@ export default function ScenarioModelingPage() {
                     </div>
 
                     {isExpanded && hasChildren && (
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-3 pt-3 border-t border-gray-300/50 space-y-2">
                             {node.children!.map((child, childIndex) => 
                                 renderDriverNode(child, depth + 1, nodeIndex, rootIndex)
                             )}
@@ -1843,23 +1717,58 @@ export default function ScenarioModelingPage() {
                             </div>
                         </div>
 
-                        {/* Margin Summary at Top */}
+                        {/* Margin Summary at Top - Aligned with table */}
                         {Object.keys(scenarioPnLData).length > 0 && selectedPeriods.length > 0 && (
-                            <div className="px-6 py-4 bg-blue-50 border-b-2 border-blue-200">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-4">
-                                        <span className="text-lg font-semibold text-gray-900">Margin Summary:</span>
+                            <div className="bg-blue-50 border-b-2 border-blue-200">
+                                <div className="flex items-center">
+                                    <div className="text-left py-4 px-6 font-semibold text-gray-900 min-w-[250px]">
+                                        <span className="text-lg">Margin Summary:</span>
                                     </div>
-                                    <div className="flex items-center space-x-6">
+                                    <div className="flex items-center flex-1">
                                         {selectedPeriods.map(period => {
                                             const periodData = scenarioPnLData[period];
-                                            const margin = periodData?.Margin || 0;
-                                            const marginPct = periodData?.MarginPct || 0;
+                                            const basePeriodData = basePnLData[period];
+                                            
+                                            // ALWAYS use basePnLData Margin_$mm directly from Fact_Margin (source of truth)
+                                            // Only use scenario data if levers have been moved
+                                            const hasLeverMovement = Object.values(leverValues).some(val => Math.abs(val) > 0.01);
+                                            
+                                            let margin = 0;
+                                            if (hasLeverMovement && periodData?.['Margin_$mm'] !== undefined && periodData?.['Margin_$mm'] !== null && periodData['Margin_$mm'] !== 0) {
+                                                // Use scenario data if levers moved
+                                                margin = periodData['Margin_$mm'];
+                                            } else if (basePeriodData?.['Margin_$mm'] !== undefined && basePeriodData?.['Margin_$mm'] !== null) {
+                                                // Always prefer base Margin_$mm from Fact_Margin
+                                                margin = basePeriodData['Margin_$mm'];
+                                            } else if (basePeriodData?.Margin !== undefined && basePeriodData?.Margin !== null) {
+                                                // Fallback to Margin
+                                                margin = basePeriodData.Margin;
+                                            }
+                                            
+                                            const marginPct = periodData?.MarginPct || basePeriodData?.MarginPct || 0;
+                                            
+                                            // Format margin - Margin_$mm from Fact_Margin is already in the correct units
+                                            // Use formatCurrency which handles the conversion automatically
+                                            const formattedMargin = formatCurrency(margin);
+                                            
+                                            // Debug logging for first period
+                                            if (period === selectedPeriods[0]) {
+                                                console.log('Margin Summary Debug for', period, ':', {
+                                                    hasLeverMovement,
+                                                    baseMargin_$mm: basePeriodData?.['Margin_$mm'],
+                                                    baseMargin: basePeriodData?.Margin,
+                                                    scenarioMargin_$mm: periodData?.['Margin_$mm'],
+                                                    scenarioMargin: periodData?.Margin,
+                                                    finalMargin: margin,
+                                                    formattedMargin: formattedMargin,
+                                                    marginPct
+                                                });
+                                            }
+                                            
                                             return (
-                                                <div key={period} className="text-right">
-                                                    <div className="text-sm text-gray-600 mb-1">{period}</div>
+                                                <div key={period} className="text-right py-4 px-3 min-w-[160px]">
                                                     <div className="text-lg font-bold text-gray-900">
-                                                        ${(margin / 1000000).toFixed(2)}M
+                                                        {formattedMargin}
                                                     </div>
                                                     <div className="text-sm font-semibold text-blue-600">
                                                         {marginPct.toFixed(2)}%
@@ -1985,37 +1894,60 @@ export default function ScenarioModelingPage() {
                     </div>
 
                     {/* Performance Driver Tree */}
-                    <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-gray-900">Performance Driver Tree</h3>
-                            <p className="text-xs text-gray-500">
-                                Amounts reflect selected periods and lever adjustments
-                            </p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 min-h-[400px] max-h-[600px] overflow-y-auto">
-                            {excelData && excelData.tree.length > 0 && selectedPeriods.length > 0 ? (
+                    <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4">
+                            <div className="flex items-center justify-between">
                                 <div>
-                                    {/* Period headers */}
-                                    <div className="flex items-center justify-end space-x-4 mb-4 pb-2 border-b border-gray-300">
-                                        <div className="w-[200px]"></div> {/* Spacer for node name column */}
-                                        {selectedPeriods.map(period => (
-                                            <div key={period} className="text-xs font-semibold text-gray-700 min-w-[100px] text-right">
-                                                {period}
-                                            </div>
-                                        ))}
+                                    <h3 className="text-xl font-bold text-white">Performance Driver Tree</h3>
+                                    <p className="text-sm text-blue-100 mt-1">
+                                        All values sourced directly from Fact_Margin • Levels 0-5
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 bg-gray-50 min-h-[500px] max-h-[700px] overflow-y-auto overflow-x-auto">
+                            {excelData && excelData.tree.length > 0 && selectedPeriods.length > 0 ? (
+                                <div className="min-w-full">
+                                    {/* Period headers - sticky */}
+                                    <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b-2 border-gray-300 sticky top-0 bg-gray-50 z-10 -mx-6 px-6">
+                                        <div className="min-w-[300px] flex-shrink-0">
+                                            <span className="text-sm font-bold text-gray-700">Driver</span>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                            {selectedPeriods.map(period => (
+                                                <div key={period} className="text-sm font-bold text-gray-700 min-w-[110px] max-w-[110px] text-right px-2">
+                                                    {period}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
+                                    {/* Driver tree nodes */}
                                     <div className="space-y-2">
                                         {excelData.tree.map((rootNode, index) => renderDriverNode(rootNode, 0, '', index))}
                                     </div>
                                 </div>
                             ) : excelData && excelData.tree.length > 0 ? (
-                                <p className="text-sm text-gray-500 text-center py-8">
-                                    Please select at least one period to view driver tree amounts.
-                                </p>
+                                <div className="flex items-center justify-center h-full min-h-[400px]">
+                                    <div className="text-center">
+                                        <p className="text-base text-gray-600 font-medium mb-2">
+                                            Please select at least one period to view driver tree amounts.
+                                        </p>
+                                        <p className="text-sm text-gray-500">
+                                            Use the period buttons above to select quarters.
+                                        </p>
+                                    </div>
+                                </div>
                             ) : (
-                                <p className="text-sm text-gray-500 text-center py-8">
-                                    Performance Driver Tree will appear here when Excel data is uploaded.
-                                </p>
+                                <div className="flex items-center justify-center h-full min-h-[400px]">
+                                    <div className="text-center">
+                                        <p className="text-base text-gray-600 font-medium mb-2">
+                                            Performance Driver Tree will appear here when Excel data is uploaded.
+                                        </p>
+                                        <p className="text-sm text-gray-500">
+                                            Upload an Excel file with DriverTree and Fact_Margin tabs.
+                                        </p>
+                                    </div>
+                                </div>
                             )}
                         </div>
                     </div>
