@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
     TrendingUp,
@@ -32,7 +32,7 @@ interface PnLData {
     };
 }
 
-export default function OperationalPerformance() {
+function OperationalPerformanceContent() {
     const searchParams = useSearchParams();
     const [excelData, setExcelData] = useState<ExcelDriverTreeData | null>(null);
     const [selectedDimensions, setSelectedDimensions] = useState<string[]>(['Geography']); // Default to Geography
@@ -1391,6 +1391,21 @@ export default function OperationalPerformance() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function OperationalPerformance() {
+    return (
+        <Suspense fallback={
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                    <p className="text-gray-600">Loading...</p>
+                </div>
+            </div>
+        }>
+            <OperationalPerformanceContent />
+        </Suspense>
     );
 }
 
