@@ -1036,24 +1036,22 @@ export default function ScenarioModelingPage() {
 
         // Re-roll up amounts after applying impacts
         const rollUpAmounts = (node: DriverTreeNode) => {
-            const nodePeriodData = data.get(node.id);
-            if (!nodePeriodData) {
-                data.set(node.id, new Map<string, number>());
-            }
-            const finalNodeData = data.get(node.id)!;
-            
-            // For non-leaf nodes, reset to 0 and sum from children
-            // For leaf nodes (Level 4), keep the values we already set
+            // For Level 4 nodes, don't reset - they already have their values from base + impacts
             if (node.level === 4) {
-                // Level 4 nodes already have their values set, don't reset
                 return;
+            }
+            
+            let finalNodeData = data.get(node.id);
+            if (!finalNodeData) {
+                finalNodeData = new Map<string, number>();
+                data.set(node.id, finalNodeData);
             }
             
             // Reset to 0 for roll-up (only for parent nodes)
             periodsToProcess.forEach(period => {
                 // Normalize period for consistent key matching
                 const normalizedPeriod = String(period).trim();
-                finalNodeData.set(normalizedPeriod, 0);
+                finalNodeData!.set(normalizedPeriod, 0);
             });
 
             if (node.children && node.children.length > 0) {
@@ -1065,14 +1063,12 @@ export default function ScenarioModelingPage() {
                             // Normalize period for consistent key matching
                             const normalizedPeriod = String(period).trim();
                             const childAmount = childData.get(normalizedPeriod) || 0;
-                            const currentAmount = nodePeriodData.get(normalizedPeriod) || 0;
-                            nodePeriodData.set(normalizedPeriod, currentAmount + childAmount);
+                            const currentAmount = finalNodeData!.get(normalizedPeriod) || 0;
+                            finalNodeData!.set(normalizedPeriod, currentAmount + childAmount);
                         });
                     }
                 });
             }
-
-            data.set(node.id, nodePeriodData);
         };
 
         excelData.tree.forEach(node => rollUpAmounts(node));

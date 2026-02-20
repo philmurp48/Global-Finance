@@ -467,7 +467,7 @@ export default function HomePage() {
 
         // Primary Financial Metrics (Top Row)
         // Total Revenue
-        if (excelMetrics.totalRevenue > 0) {
+        if (excelMetrics.totalRevenue && excelMetrics.totalRevenue > 0) {
             const trend = excelMetrics.revenueTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -491,7 +491,7 @@ export default function HomePage() {
         }
 
         // Total Expense
-        if (excelMetrics.totalExpense > 0) {
+        if (excelMetrics.totalExpense && excelMetrics.totalExpense > 0) {
             const trend = excelMetrics.expenseTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -515,7 +515,7 @@ export default function HomePage() {
         }
 
         // Margin
-        if (excelMetrics.totalMargin !== 0) {
+        if (excelMetrics.totalMargin !== undefined && excelMetrics.totalMargin !== 0) {
             const trend = excelMetrics.marginTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -539,7 +539,7 @@ export default function HomePage() {
         }
 
         // Margin Percentage
-        if (excelMetrics.marginPct !== 0) {
+        if (excelMetrics.marginPct !== undefined && excelMetrics.marginPct !== 0) {
             const trend = excelMetrics.marginPctTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -564,7 +564,7 @@ export default function HomePage() {
 
         // Key Operational Metrics (Second Row)
         // AUM - Show in Billions
-        if (excelMetrics.totalAUM > 0) {
+        if (excelMetrics.totalAUM && excelMetrics.totalAUM > 0) {
             const trend = excelMetrics.aumTrend || 0;
             const aumInBillions = excelMetrics.totalAUM / 1000; // Convert MM to B
             insights.push({
@@ -589,7 +589,7 @@ export default function HomePage() {
         }
 
         // Trading Volume
-        if (excelMetrics.totalTradingVolume > 0) {
+        if (excelMetrics.totalTradingVolume && excelMetrics.totalTradingVolume > 0) {
             const trend = excelMetrics.tradingVolumeTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -613,7 +613,7 @@ export default function HomePage() {
         }
 
         // Headcount
-        if (excelMetrics.totalHeadcount > 0) {
+        if (excelMetrics.totalHeadcount && excelMetrics.totalHeadcount > 0) {
             const trend = excelMetrics.headcountTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -638,7 +638,7 @@ export default function HomePage() {
 
         // Revenue Components (Third Row)
         // Transaction Fees
-        if (excelMetrics.totalTransactionFees > 0) {
+        if (excelMetrics.totalTransactionFees && excelMetrics.totalTransactionFees > 0) {
             const trend = excelMetrics.transactionFeesTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -662,7 +662,7 @@ export default function HomePage() {
         }
 
         // Custody Safekeeping
-        if (excelMetrics.totalCustodySafekeeping > 0) {
+        if (excelMetrics.totalCustodySafekeeping && excelMetrics.totalCustodySafekeeping > 0) {
             const trend = excelMetrics.custodySafekeepingTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -686,7 +686,7 @@ export default function HomePage() {
         }
 
         // Admin Fund Expense
-        if (excelMetrics.totalAdminFundExpense > 0) {
+        if (excelMetrics.totalAdminFundExpense && excelMetrics.totalAdminFundExpense > 0) {
             const trend = excelMetrics.adminFundExpenseTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -710,7 +710,7 @@ export default function HomePage() {
         }
 
         // Performance Fees
-        if (excelMetrics.totalPerformanceFees > 0) {
+        if (excelMetrics.totalPerformanceFees && excelMetrics.totalPerformanceFees > 0) {
             const trend = excelMetrics.performanceFeesTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -734,7 +734,7 @@ export default function HomePage() {
         }
 
         // Interest Rate Revenue
-        if (excelMetrics.totalInterestRateRevenue > 0) {
+        if (excelMetrics.totalInterestRateRevenue && excelMetrics.totalInterestRateRevenue > 0) {
             const trend = excelMetrics.interestRateRevenueTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -759,7 +759,7 @@ export default function HomePage() {
 
         // Expense Components (Fourth Row)
         // Comp Benefits
-        if (excelMetrics.totalCompBenefits > 0) {
+        if (excelMetrics.totalCompBenefits && excelMetrics.totalCompBenefits > 0) {
             const trend = excelMetrics.compBenefitsTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -783,7 +783,7 @@ export default function HomePage() {
         }
 
         // Tech and Data
-        if (excelMetrics.totalTechData > 0) {
+        if (excelMetrics.totalTechData && excelMetrics.totalTechData > 0) {
             const trend = excelMetrics.techDataTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -807,7 +807,7 @@ export default function HomePage() {
         }
 
         // Sales & Marketing
-        if (excelMetrics.totalSalesMktg > 0) {
+        if (excelMetrics.totalSalesMktg && excelMetrics.totalSalesMktg > 0) {
             const trend = excelMetrics.salesMktgTrend || 0;
             insights.push({
                 id: idCounter++,
@@ -831,7 +831,7 @@ export default function HomePage() {
         }
 
         // Ops Prof Services
-        if (excelMetrics.totalOpsProfSvcs > 0) {
+        if (excelMetrics.totalOpsProfSvcs && excelMetrics.totalOpsProfSvcs > 0) {
             const trend = excelMetrics.opsProfSvcsTrend || 0;
             insights.push({
                 id: idCounter++,
