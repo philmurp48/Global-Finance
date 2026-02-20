@@ -12,12 +12,13 @@ import {
     TrendingUp,
     BarChart3
 } from 'lucide-react';
-import { ExcelDriverTreeData, FactMarginRecord } from '@/lib/excel-parser';
+import { ExcelDriverTreeData, FactMarginRecord, DriverTreeNode, PeriodData } from '@/lib/excel-parser';
 
 interface ScenarioLever {
     id: string;
     name: string;
-    fieldName: string; // Field name in Fact_Margin
+    factMarginFieldName: string; // Field name in Fact_Margin (e.g., "AUM_$mm")
+    reportFieldName: string; // Report Field Name for display (e.g., "AUM")
     currentValue: number; // Percentage change
     minValue: number;
     maxValue: number;
@@ -25,6 +26,50 @@ interface ScenarioLever {
     affectsField: string; // Which P&L field this affects
     affectsTotal: string; // Which total this affects (TotalRevenue or Total Expense)
 }
+
+// Mapping table: Fact_Margin Field Name -> Report Field Name
+const fieldNameMapping: Record<string, string> = {
+    'TradingVolume_$mm': 'Trading Volume',
+    'TxnFeeRate_bps': 'Rev Transaction Fees',
+    'AUM_$mm': 'AUM',
+    'CashBalances_$mm': 'Cash Balance',
+    'NIM_bps_annual': 'NIM',
+    'MarketReturn_pct': 'Market Return Percent',
+    'Rev_TransactionalFees_$mm': 'Rev Transaction Fees',
+    'Rev_CustodySafekeeping_$mm': 'Rev CustodySafekeeping',
+    'Rev_AdminFundExpense_$mm': 'AdminFundExpense',
+    'Rev_PerformanceFees_$mm': 'PerformanceFees',
+    'Rev_InterestRateRevenue_$mm': 'Interest Rate Revenue',
+    'TotalRevenue_$mm': 'TotalRevenue',
+    'Headcount_FTE': 'Headcount',
+    'Exp_CompBenefits_$mm': 'Exp_CompBenefits',
+    'Exp_TechData_$mm': 'Exp_Tech and Data',
+    'Exp_SalesMktg_$mm': 'Exp_SalesMktg',
+    'Exp_OpsProfSvcs_$mm': 'Exp_OpsProfSvcs',
+    'TotalExpense_$mm': 'Total Expense',
+    'Margin_$mm': 'Margin',
+    'MarginPct': 'MarginPct'
+};
+
+// Helper to get Report Field Name from Fact_Margin Field Name
+const getReportFieldName = (factMarginFieldName: string): string => {
+    // Try exact match first
+    if (fieldNameMapping[factMarginFieldName]) {
+        return fieldNameMapping[factMarginFieldName];
+    }
+    
+    // Try fuzzy matching
+    const factMarginLower = factMarginFieldName.toLowerCase();
+    for (const [factField, reportField] of Object.entries(fieldNameMapping)) {
+        const factFieldLower = factField.toLowerCase();
+        if (factMarginLower.includes(factFieldLower) || factFieldLower.includes(factMarginLower)) {
+            return reportField;
+        }
+    }
+    
+    // If no match, return original
+    return factMarginFieldName;
+};
 
 interface PnLLineItem {
     label: string;
@@ -155,6 +200,32 @@ export default function ScenarioModelingPage() {
     const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]);
     const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+    const [expandedDrivers, setExpandedDrivers] = useState<Set<string>>(new Set());
+    
+    // Expand to Level 2 by default
+    useEffect(() => {
+        if (excelData && excelData.tree && excelData.tree.length > 0) {
+            const expanded = new Set<string>();
+            const expandToLevel2 = (nodes: DriverTreeNode[], parentIndex: string = '', rootIndex: number = 0) => {
+                nodes.forEach((node, index) => {
+                    const nodeIndex = parentIndex 
+                        ? `${parentIndex}-${node.id}` 
+                        : `root-${rootIndex}-${node.id}`;
+                    
+                    // Expand if level is 1 or 2
+                    if (node.level && node.level <= 2) {
+                        expanded.add(nodeIndex);
+                    }
+                    
+                    if (node.children && node.children.length > 0) {
+                        expandToLevel2(node.children, nodeIndex, rootIndex);
+                    }
+                });
+            };
+            excelData.tree.forEach((rootNode, rootIndex) => expandToLevel2([rootNode], '', rootIndex));
+            setExpandedDrivers(expanded);
+        }
+    }, [excelData]);
     
     // Scenario levers based on Fact_Margin fields
     const [leverValues, setLeverValues] = useState<Record<string, number>>({
@@ -190,30 +261,75 @@ export default function ScenarioModelingPage() {
         loadData();
     }, []);
 
+    // Expand to Level 2 by default
+    useEffect(() => {
+        if (excelData && excelData.tree && excelData.tree.length > 0) {
+            const expanded = new Set<string>();
+            const expandToLevel2 = (nodes: DriverTreeNode[], parentIndex: string = '', rootIndex: number = 0) => {
+                nodes.forEach((node, index) => {
+                    const nodeIndex = parentIndex 
+                        ? `${parentIndex}-${node.id}` 
+                        : `root-${rootIndex}-${node.id}`;
+                    
+                    // Expand if level is 1 or 2
+                    if (node.level && node.level <= 2) {
+                        expanded.add(nodeIndex);
+                    }
+                    
+                    if (node.children && node.children.length > 0) {
+                        expandToLevel2(node.children, nodeIndex, rootIndex);
+                    }
+                });
+            };
+            excelData.tree.forEach((rootNode, rootIndex) => expandToLevel2([rootNode], '', rootIndex));
+            setExpandedDrivers(expanded);
+        }
+    }, [excelData]);
+
     // Extract available periods from Fact_Margin Quarter field
     useEffect(() => {
-        if (!excelData || !excelData.factMarginRecords) return;
+        if (!excelData || !excelData.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            console.warn('No Fact_Margin records available for period extraction');
+            setAvailablePeriods([]);
+            return;
+        }
 
         const quarters = new Set<string>();
         excelData.factMarginRecords.forEach(record => {
             if (!record) return;
+            
+            // Try to find Quarter field (case-insensitive)
             const quarterKey = Object.keys(record).find(key => 
                 key.toLowerCase() === 'quarter'
             );
+            
             if (quarterKey) {
                 const quarterValue = record[quarterKey];
                 if (quarterValue !== undefined && quarterValue !== null && quarterValue !== '') {
-                    quarters.add(String(quarterValue));
+                    const quarterStr = String(quarterValue).trim();
+                    if (quarterStr) {
+                        quarters.add(quarterStr);
+                    }
                 }
+            } else {
+                // Debug: log available keys if Quarter not found
+                console.warn('Quarter field not found in record. Available keys:', Object.keys(record).slice(0, 10));
             }
         });
         
         const sortedQuarters = Array.from(quarters).sort();
+        console.log('Extracted periods from Fact_Margin Quarter field:', sortedQuarters);
         setAvailablePeriods(sortedQuarters);
         
-        // Select all periods by default
-        if (sortedQuarters.length > 0 && selectedPeriods.length === 0) {
-            setSelectedPeriods(sortedQuarters);
+        // Auto-select all periods if none selected
+        if (sortedQuarters.length > 0) {
+            setSelectedPeriods(prev => {
+                if (prev.length === 0) {
+                    console.log('Auto-selecting all periods:', sortedQuarters);
+                    return sortedQuarters;
+                }
+                return prev;
+            });
         }
     }, [excelData]);
 
@@ -465,7 +581,8 @@ export default function ScenarioModelingPage() {
         {
             id: 'AUM',
             name: 'AUM',
-            fieldName: 'AUM',
+            factMarginFieldName: 'AUM_$mm',
+            reportFieldName: 'AUM',
             currentValue: leverValues.AUM || 0,
             minValue: -50,
             maxValue: 50,
@@ -476,7 +593,8 @@ export default function ScenarioModelingPage() {
         {
             id: 'TxnFeeRate',
             name: 'Txn Fee Rate',
-            fieldName: 'TxnFeeRate',
+            factMarginFieldName: 'TxnFeeRate_bps',
+            reportFieldName: 'Rev Transaction Fees',
             currentValue: leverValues.TxnFeeRate || 0,
             minValue: -50,
             maxValue: 50,
@@ -487,7 +605,8 @@ export default function ScenarioModelingPage() {
         {
             id: 'TradingVolume',
             name: 'Trading Volume',
-            fieldName: 'TradingVolume',
+            factMarginFieldName: 'TradingVolume_$mm',
+            reportFieldName: 'Trading Volume',
             currentValue: leverValues.TradingVolume || 0,
             minValue: -50,
             maxValue: 50,
@@ -498,7 +617,8 @@ export default function ScenarioModelingPage() {
         {
             id: 'Headcount_FTE',
             name: 'Headcount FTE',
-            fieldName: 'Headcount',
+            factMarginFieldName: 'Headcount_FTE',
+            reportFieldName: 'Headcount',
             currentValue: leverValues.Headcount_FTE || 0,
             minValue: -50,
             maxValue: 50,
@@ -587,6 +707,500 @@ export default function ScenarioModelingPage() {
                 return [...prev, period];
             }
         });
+    };
+
+    const toggleDriver = (driverId: string) => {
+        setExpandedDrivers(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(driverId)) {
+                newSet.delete(driverId);
+            } else {
+                newSet.add(driverId);
+            }
+            return newSet;
+        });
+    };
+
+    // Helper to get amount for a driver from Fact_Margin record
+    const getAmountForDriver = (record: FactMarginRecord, driverName: string): number | null => {
+        const driverNameLower = driverName.toLowerCase().trim();
+        
+        // Try exact match first
+        for (const [key, value] of Object.entries(record)) {
+            const keyLower = key.toLowerCase().trim();
+            if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+            
+            if (keyLower === driverNameLower) {
+                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(numValue)) {
+                    return numValue;
+                }
+            }
+        }
+        
+        // Try partial match
+        for (const [key, value] of Object.entries(record)) {
+            const keyLower = key.toLowerCase().trim();
+            if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+            
+            if (keyLower.includes(driverNameLower) || driverNameLower.includes(keyLower)) {
+                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(numValue)) {
+                    return numValue;
+                }
+            }
+        }
+        
+        return null;
+    };
+
+    // Calculate base driver tree amounts from Fact_Margin for selected periods
+    const baseDriverTreeData = useMemo(() => {
+        if (!excelData || !excelData.tree || excelData.tree.length === 0 || !excelData.factMarginRecords) {
+            return new Map<string, Map<string, number>>(); // Map of nodeId -> Map of period -> amount
+        }
+
+        const data = new Map<string, Map<string, number>>();
+        const periodsToProcess = selectedPeriods.length > 0 ? selectedPeriods : availablePeriods;
+
+        if (periodsToProcess.length === 0) {
+            console.warn('No periods to process for driver tree', {
+                selectedPeriods,
+                availablePeriods,
+                factMarginRecordCount: excelData.factMarginRecords?.length || 0
+            });
+            return data;
+        }
+
+        // Extract Level 4 driver names from tree
+        const extractLevel4Names = (nodes: DriverTreeNode[]): string[] => {
+            const names: string[] = [];
+            const traverse = (node: DriverTreeNode) => {
+                if (node.level === 4) {
+                    names.push(node.name);
+                }
+                if (node.children) {
+                    node.children.forEach(child => traverse(child));
+                }
+            };
+            nodes.forEach(node => traverse(node));
+            return names;
+        };
+
+        const level4Names = extractLevel4Names(excelData.tree);
+
+        // Initialize all nodes
+        const initializeNode = (node: DriverTreeNode) => {
+            if (!data.has(node.id)) {
+                data.set(node.id, new Map<string, number>());
+            }
+            if (node.children) {
+                node.children.forEach(child => initializeNode(child));
+            }
+        };
+        excelData.tree.forEach(node => initializeNode(node));
+
+        // Aggregate Level 4 amounts from Fact_Margin for each period
+        periodsToProcess.forEach(period => {
+            excelData.factMarginRecords.forEach(record => {
+                if (!record) return;
+
+                // Check if this record matches the period
+                const quarterKey = Object.keys(record).find(key => 
+                    key.toLowerCase() === 'quarter'
+                );
+                if (!quarterKey) return;
+                
+                const quarter = String(record[quarterKey] || '').trim();
+                // Normalize both for comparison (trim whitespace, case-insensitive)
+                const normalizedQuarter = quarter.trim();
+                const normalizedPeriod = String(period).trim();
+                if (!quarter || normalizedQuarter !== normalizedPeriod) {
+                    // Skip records that don't match the current period
+                    return;
+                }
+
+                // For each Level 4 driver, get the amount using fuzzy matching
+                level4Names.forEach(driverName => {
+                    // Use the same fuzzy matching logic as getFieldValue
+                    // This handles cases where driver name might be "TradingVolume_$mm" and Fact_Margin has "TradingVolume_$mm"
+                    const amount = getFieldValue(record, driverName);
+                    if (amount !== null && !isNaN(amount)) {
+                        // Find the Level 4 node with this name using fuzzy matching
+                        const findNode = (nodes: DriverTreeNode[]): DriverTreeNode | null => {
+                            for (const node of nodes) {
+                                if (node.level === 4) {
+                                    // Use fuzzy matching to find the node
+                                    const nodeNameLower = node.name.toLowerCase().trim();
+                                    const driverNameLower = driverName.toLowerCase().trim();
+                                    
+                                    // Try exact match first
+                                    if (nodeNameLower === driverNameLower) {
+                                        return node;
+                                    }
+                                    
+                                    // Try partial match
+                                    if (nodeNameLower.includes(driverNameLower) || driverNameLower.includes(nodeNameLower)) {
+                                        return node;
+                                    }
+                                    
+                                    // Try normalized match (remove special chars, units)
+                                    const normalize = (str: string) => str.replace(/[^a-z0-9]/g, '').toLowerCase();
+                                    if (normalize(nodeNameLower) === normalize(driverNameLower)) {
+                                        return node;
+                                    }
+                                }
+                                if (node.children) {
+                                    const found = findNode(node.children);
+                                    if (found) return found;
+                                }
+                            }
+                            return null;
+                        };
+
+                        const level4Node = findNode(excelData.tree);
+                        if (level4Node) {
+                            const nodeData = data.get(level4Node.id);
+                            if (nodeData) {
+                                // Ensure period is normalized (trimmed string) for consistent key matching
+                                const normalizedPeriod = String(period).trim();
+                                const currentAmount = nodeData.get(normalizedPeriod) || 0;
+                                nodeData.set(normalizedPeriod, currentAmount + amount);
+                            }
+                        }
+                    }
+                });
+            });
+        });
+        
+        // Debug logging
+        if (periodsToProcess.length > 0 && level4Names.length > 0 && excelData.factMarginRecords.length > 0) {
+            console.log('Driver Tree Calculation Debug:', {
+                periodsToProcess,
+                level4Names: level4Names.slice(0, 5), // First 5 for debugging
+                recordCount: excelData.factMarginRecords.length,
+                firstRecordKeys: Object.keys(excelData.factMarginRecords[0] || {}).slice(0, 10)
+            });
+            
+            // Check if we found any amounts
+            let totalAmounts = 0;
+            let sampleAmounts: Array<{nodeId: string, period: string, amount: number}> = [];
+            data.forEach((periodData, nodeId) => {
+                periodData.forEach((amount, period) => {
+                    if (amount !== 0) {
+                        totalAmounts++;
+                        if (sampleAmounts.length < 10) {
+                            sampleAmounts.push({nodeId, period, amount});
+                        }
+                    }
+                });
+            });
+            console.log('Total non-zero amounts found:', totalAmounts);
+            if (sampleAmounts.length > 0) {
+                console.log('Sample amounts (first 10):', sampleAmounts);
+                
+                // Also show what's in the first Level 1 node
+                const firstRootNode = excelData.tree[0];
+                if (firstRootNode) {
+                    const rootNodeData = data.get(firstRootNode.id);
+                    if (rootNodeData) {
+                        console.log('First root node data:', {
+                            nodeId: firstRootNode.id,
+                            nodeName: firstRootNode.name,
+                            entries: Array.from(rootNodeData.entries())
+                        });
+                    }
+                }
+            } else {
+                console.warn('No amounts found! Checking first record...');
+                const firstRecord = excelData.factMarginRecords[0];
+                if (firstRecord) {
+                    const quarterKey = Object.keys(firstRecord).find(key => key.toLowerCase() === 'quarter');
+                    console.log('First record quarter:', quarterKey ? firstRecord[quarterKey] : 'not found');
+                    console.log('First record sample fields:', Object.keys(firstRecord).filter(k => 
+                        !k.toLowerCase().includes('id') && 
+                        !k.toLowerCase().includes('quarter') &&
+                        !k.toLowerCase().includes('period')
+                    ).slice(0, 10));
+                    
+                    // Try to match first level4 name
+                    if (level4Names.length > 0) {
+                        const testDriver = level4Names[0];
+                        const testAmount = getFieldValue(firstRecord, testDriver);
+                        console.log(`Test match for "${testDriver}":`, testAmount);
+                    }
+                }
+            }
+        }
+
+        // Roll up from Level 4 to Level 3 to Level 2 to Level 1
+        const rollUpAmounts = (node: DriverTreeNode) => {
+            const nodePeriodData = data.get(node.id) || new Map<string, number>();
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => {
+                    rollUpAmounts(child);
+                    const childData = data.get(child.id);
+                    if (childData) {
+                        periodsToProcess.forEach(period => {
+                            // Normalize period for consistent key matching
+                            const normalizedPeriod = String(period).trim();
+                            const childAmount = childData.get(normalizedPeriod) || 0;
+                            const currentAmount = nodePeriodData.get(normalizedPeriod) || 0;
+                            nodePeriodData.set(normalizedPeriod, currentAmount + childAmount);
+                        });
+                    }
+                });
+            }
+
+            data.set(node.id, nodePeriodData);
+        };
+
+        excelData.tree.forEach(node => rollUpAmounts(node));
+
+        return data;
+    }, [excelData, selectedPeriods, availablePeriods]);
+
+    // Calculate scenario driver tree with lever impacts
+    const scenarioDriverTreeData = useMemo(() => {
+        if (!excelData || !excelData.tree || excelData.tree.length === 0) {
+            return new Map<string, Map<string, number>>();
+        }
+
+        const data = new Map<string, Map<string, number>>();
+        const periodsToProcess = selectedPeriods.length > 0 ? selectedPeriods : availablePeriods;
+
+        // Start with base data
+        baseDriverTreeData.forEach((periodData, nodeId) => {
+            data.set(nodeId, new Map(periodData));
+        });
+
+        // Define levers for matching (using Fact_Margin field names)
+        const levers = [
+            { id: 'AUM', factMarginFieldName: 'AUM_$mm' },
+            { id: 'TxnFeeRate', factMarginFieldName: 'TxnFeeRate_bps' },
+            { id: 'TradingVolume', factMarginFieldName: 'TradingVolume_$mm' },
+            { id: 'Headcount_FTE', factMarginFieldName: 'Headcount_FTE' }
+        ];
+
+        // Apply lever impacts directly to Level 4 nodes that match the lever's Fact_Margin field name
+        // Each lever directly affects its corresponding driver field (e.g., AUM slider affects AUM_$mm)
+        const applyLeverImpacts = (nodes: DriverTreeNode[]) => {
+            nodes.forEach(node => {
+                if (node.level === 4) {
+                    const nodeNameLower = node.name.toLowerCase().trim();
+                    const normalize = (str: string) => str.replace(/[^a-z0-9]/g, '').toLowerCase();
+                    const nodeNameNormalized = normalize(nodeNameLower);
+                    
+                    // Check each lever and apply impact if this Level 4 node matches the lever's Fact_Margin field
+                    levers.forEach(lever => {
+                        const factMarginFieldLower = lever.factMarginFieldName.toLowerCase().trim();
+                        const factMarginFieldNormalized = normalize(factMarginFieldLower);
+                        
+                        // Check if this Level 4 node matches the lever's Fact_Margin field name
+                        const matches = 
+                            nodeNameLower === factMarginFieldLower ||
+                            nodeNameLower.includes(factMarginFieldLower) ||
+                            factMarginFieldLower.includes(nodeNameLower) ||
+                            nodeNameNormalized === factMarginFieldNormalized ||
+                            nodeNameNormalized.includes(factMarginFieldNormalized) ||
+                            factMarginFieldNormalized.includes(nodeNameNormalized);
+                        
+                        if (matches) {
+                            const leverChange = leverValues[lever.id] || 0;
+                            if (leverChange !== 0) {
+                                periodsToProcess.forEach(period => {
+                                    const nodeData = data.get(node.id);
+                                    if (nodeData) {
+                                        // Normalize period for consistent key matching
+                                        const normalizedPeriod = String(period).trim();
+                                        const baseAmount = nodeData.get(normalizedPeriod) || 0;
+                                        // Apply percentage change directly to the driver value
+                                        const impact = baseAmount * (leverChange / 100);
+                                        nodeData.set(normalizedPeriod, baseAmount + impact);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                }
+
+                // Recursively process children
+                if (node.children) {
+                    applyLeverImpacts(node.children);
+                }
+            });
+        };
+
+        applyLeverImpacts(excelData.tree);
+
+        // Re-roll up amounts after applying impacts
+        const rollUpAmounts = (node: DriverTreeNode) => {
+            const nodePeriodData = data.get(node.id);
+            if (!nodePeriodData) {
+                data.set(node.id, new Map<string, number>());
+            }
+            const finalNodeData = data.get(node.id)!;
+            
+            // For non-leaf nodes, reset to 0 and sum from children
+            // For leaf nodes (Level 4), keep the values we already set
+            if (node.level === 4) {
+                // Level 4 nodes already have their values set, don't reset
+                return;
+            }
+            
+            // Reset to 0 for roll-up (only for parent nodes)
+            periodsToProcess.forEach(period => {
+                // Normalize period for consistent key matching
+                const normalizedPeriod = String(period).trim();
+                finalNodeData.set(normalizedPeriod, 0);
+            });
+
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => {
+                    rollUpAmounts(child);
+                    const childData = data.get(child.id);
+                    if (childData) {
+                        periodsToProcess.forEach(period => {
+                            // Normalize period for consistent key matching
+                            const normalizedPeriod = String(period).trim();
+                            const childAmount = childData.get(normalizedPeriod) || 0;
+                            const currentAmount = nodePeriodData.get(normalizedPeriod) || 0;
+                            nodePeriodData.set(normalizedPeriod, currentAmount + childAmount);
+                        });
+                    }
+                });
+            }
+
+            data.set(node.id, nodePeriodData);
+        };
+
+        excelData.tree.forEach(node => rollUpAmounts(node));
+
+        return data;
+    }, [baseDriverTreeData, leverValues, excelData, selectedPeriods, availablePeriods]);
+
+    // Render driver tree node
+    const renderDriverNode = (node: DriverTreeNode, depth: number = 0, parentIndex: string = '', rootIndex: number = 0) => {
+        const nodeIndex = parentIndex 
+            ? `${parentIndex}-${node.id}` 
+            : `root-${rootIndex}-${node.id}`;
+        const isExpanded = expandedDrivers.has(nodeIndex);
+        const hasChildren = node.children && node.children.length > 0;
+        
+        const periodsToShow = selectedPeriods.length > 0 ? selectedPeriods : availablePeriods;
+        const nodeData = scenarioDriverTreeData.get(node.id);
+        const baseNodeData = baseDriverTreeData.get(node.id);
+        
+        // Debug logging for first node
+        if (node.level === 1 && periodsToShow.length > 0) {
+            console.log('Rendering driver node:', {
+                nodeName: node.name,
+                nodeId: node.id,
+                periodsToShow,
+                hasNodeData: !!nodeData,
+                hasBaseNodeData: !!baseNodeData,
+                nodeDataSample: nodeData ? Array.from(nodeData.entries()).slice(0, 2) : null,
+                baseNodeDataSample: baseNodeData ? Array.from(baseNodeData.entries()).slice(0, 2) : null
+            });
+        }
+
+        return (
+            <div key={node.id} className="relative mb-1">
+                {depth > 0 && (
+                    <div className="absolute -left-4 top-3 w-4 h-0.5 bg-gray-300"></div>
+                )}
+                
+                <div 
+                    className="bg-gray-50 border border-gray-200 rounded p-3 shadow-sm hover:bg-gray-100 transition-colors"
+                    style={{ marginLeft: `${depth * 20}px` }}
+                >
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2 flex-1 min-w-0">
+                            {hasChildren ? (
+                                <button
+                                    onClick={() => toggleDriver(nodeIndex)}
+                                    className="flex items-center justify-center w-5 h-5 hover:bg-gray-200 rounded transition-colors flex-shrink-0"
+                                >
+                                    {isExpanded ? (
+                                        <ChevronDown className="w-4 h-4 text-gray-600" />
+                                    ) : (
+                                        <ChevronRight className="w-4 h-4 text-gray-600" />
+                                    )}
+                                </button>
+                            ) : (
+                                <div className="w-5"></div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-gray-900">
+                                    {getReportFieldName(node.name)}
+                                </span>
+                                {node.level && (
+                                    <span className="text-xs text-gray-400 ml-2">(L{node.level})</span>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center space-x-4 ml-4 flex-shrink-0">
+                            {periodsToShow.length > 0 ? periodsToShow.map(period => {
+                                // Normalize period for consistent key matching
+                                const normalizedPeriod = String(period).trim();
+                                // Show scenario amount (with lever impacts applied)
+                                const scenarioAmount = nodeData?.get(normalizedPeriod) || 0;
+                                
+                                // Debug for first period of first node
+                                if (node.level === 1 && period === periodsToShow[0] && scenarioAmount === 0) {
+                                    const actualValue = nodeData?.get(period);
+                                    const allEntries = nodeData ? Array.from(nodeData.entries()) : [];
+                                    console.log('Zero amount detected:', {
+                                        nodeName: node.name,
+                                        nodeId: node.id,
+                                        period,
+                                        periodType: typeof period,
+                                        periodLength: period?.length,
+                                        hasNodeData: !!nodeData,
+                                        nodeDataKeys: nodeData ? Array.from(nodeData.keys()) : [],
+                                        nodeDataKeysTypes: nodeData ? Array.from(nodeData.keys()).map(k => ({key: k, type: typeof k, length: k?.length})) : [],
+                                        allEntries: allEntries.slice(0, 3),
+                                        actualValue,
+                                        actualValueType: typeof actualValue,
+                                        scenarioAmount
+                                    });
+                                    
+                                    // Try to find a match with different comparison
+                                    if (nodeData) {
+                                        const matchingKey = Array.from(nodeData.keys()).find(k => 
+                                            String(k).trim() === String(period).trim() ||
+                                            String(k).toLowerCase() === String(period).toLowerCase()
+                                        );
+                                        if (matchingKey) {
+                                            console.log('Found matching key:', matchingKey, 'value:', nodeData.get(matchingKey));
+                                        }
+                                    }
+                                }
+                                
+                                return (
+                                    <div key={period} className="text-right min-w-[100px]">
+                                        <div className="text-sm font-medium text-gray-900">
+                                            {formatCurrency(scenarioAmount)}
+                                        </div>
+                                    </div>
+                                );
+                            }) : (
+                                <div className="text-sm text-gray-400">No periods selected</div>
+                            )}
+                        </div>
+                    </div>
+
+                    {isExpanded && hasChildren && (
+                        <div className="mt-2 space-y-1">
+                            {node.children!.map((child, childIndex) => 
+                                renderDriverNode(child, depth + 1, nodeIndex, rootIndex)
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -800,19 +1414,32 @@ export default function ScenarioModelingPage() {
 
                     {/* Performance Driver Tree */}
                     <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Driver Tree</h3>
-                        <p className="text-sm text-gray-600 mb-4">
-                            Visualize how drivers impact performance. {excelData && excelData.tree.length > 0 ? 'Showing data from uploaded Excel file.' : 'Upload Excel data to see your actual driver tree.'}
-                        </p>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">Performance Driver Tree</h3>
+                            <p className="text-xs text-gray-500">
+                                Amounts reflect selected periods and lever adjustments
+                            </p>
+                        </div>
                         <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 min-h-[400px] max-h-[600px] overflow-y-auto">
-                            {excelData && excelData.tree.length > 0 ? (
-                                <div className="space-y-2">
-                                    {excelData.tree.map((rootNode, index) => (
-                                        <div key={rootNode.id} className="text-sm text-gray-700">
-                                            {rootNode.name} (Level {rootNode.level})
-                                        </div>
-                                    ))}
+                            {excelData && excelData.tree.length > 0 && selectedPeriods.length > 0 ? (
+                                <div>
+                                    {/* Period headers */}
+                                    <div className="flex items-center justify-end space-x-4 mb-4 pb-2 border-b border-gray-300">
+                                        <div className="w-[200px]"></div> {/* Spacer for node name column */}
+                                        {selectedPeriods.map(period => (
+                                            <div key={period} className="text-xs font-semibold text-gray-700 min-w-[100px] text-right">
+                                                {period}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="space-y-2">
+                                        {excelData.tree.map((rootNode, index) => renderDriverNode(rootNode, 0, '', index))}
+                                    </div>
                                 </div>
+                            ) : excelData && excelData.tree.length > 0 ? (
+                                <p className="text-sm text-gray-500 text-center py-8">
+                                    Please select at least one period to view driver tree amounts.
+                                </p>
                             ) : (
                                 <p className="text-sm text-gray-500 text-center py-8">
                                     Performance Driver Tree will appear here when Excel data is uploaded.

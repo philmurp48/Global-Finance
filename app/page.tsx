@@ -465,176 +465,396 @@ export default function HomePage() {
         const insights: any[] = [];
         let idCounter = 1;
 
-        // Revenue tile
+        // Primary Financial Metrics (Top Row)
+        // Total Revenue
         if (excelMetrics.totalRevenue > 0) {
+            const trend = excelMetrics.revenueTrend || 0;
             insights.push({
                 id: idCounter++,
                 title: 'Total Revenue',
-                kpi: `$${(excelMetrics.totalRevenue / 1000000).toFixed(1)}B`,
+                kpi: `$${Math.round(excelMetrics.totalRevenue)}MM`,
                 kpiLabel: 'Total Revenue',
-                insight: `Revenue ${excelMetrics.revenueTrend >= 0 ? 'increased' : 'decreased'} by ${Math.abs(excelMetrics.revenueTrend).toFixed(1)}%`,
-                trend: excelMetrics.revenueTrend >= 0 ? 'up' : 'down',
-                value: `${excelMetrics.revenueTrend >= 0 ? '+' : ''}${excelMetrics.revenueTrend.toFixed(1)}%`,
-                priority: Math.abs(excelMetrics.revenueTrend) > 5 ? 'high' : 'medium',
+                insight: `Aggregated from all revenue streams`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'high',
                 icon: DollarSign,
                 bgColor: 'bg-green-50',
                 iconColor: 'text-green-700',
-                valueColor: excelMetrics.revenueTrend >= 0 ? 'text-green-600' : 'text-red-600',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
                 action: 'View Details',
                 category: 'Financial',
                 confidenceScore: 95,
-                dataSource: 'Excel Upload',
+                dataSource: 'Fact_Margin',
                 lastUpdated: 'Just now'
             });
         }
 
-        // Profit Margin tile
-        if (excelMetrics.profitMargin > 0) {
+        // Total Expense
+        if (excelMetrics.totalExpense > 0) {
+            const trend = excelMetrics.expenseTrend || 0;
             insights.push({
                 id: idCounter++,
-                title: 'Profit Margin',
-                kpi: `${excelMetrics.profitMargin.toFixed(1)}%`,
-                kpiLabel: 'Profit Margin',
-                insight: `Margin ${excelMetrics.profitMargin > 10 ? 'healthy' : 'needs attention'}`,
-                trend: excelMetrics.profitMargin > 10 ? 'up' : 'down',
-                value: `${excelMetrics.profitMargin.toFixed(1)}%`,
-                priority: excelMetrics.profitMargin < 5 ? 'critical' : 'medium',
+                title: 'Total Expense',
+                kpi: `$${Math.round(excelMetrics.totalExpense)}MM`,
+                kpiLabel: 'Total Expense',
+                insight: `Total operating expenses`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'high',
+                icon: TrendingDown,
+                bgColor: 'bg-red-50',
+                iconColor: 'text-red-700',
+                valueColor: trend >= 0 ? 'text-red-600' : 'text-green-600',
+                action: 'View Details',
+                category: 'Financial',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Margin
+        if (excelMetrics.totalMargin !== 0) {
+            const trend = excelMetrics.marginTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Margin',
+                kpi: `$${Math.round(excelMetrics.totalMargin)}MM`,
+                kpiLabel: 'Margin',
+                insight: `Revenue minus expenses`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: excelMetrics.totalMargin < 0 ? 'critical' : 'high',
                 icon: TrendingUp,
                 bgColor: 'bg-blue-50',
                 iconColor: 'text-blue-700',
-                valueColor: excelMetrics.profitMargin > 10 ? 'text-green-600' : 'text-red-600',
-                action: 'View Details',
-                category: 'Financial',
-                confidenceScore: 94,
-                dataSource: 'Excel Upload',
-                lastUpdated: 'Just now'
-            });
-        }
-
-        // Total Profit tile
-        if (excelMetrics.totalProfit !== 0) {
-            insights.push({
-                id: idCounter++,
-                title: 'Total Profit',
-                kpi: `$${(excelMetrics.totalProfit / 1000000).toFixed(1)}B`,
-                kpiLabel: 'Total Profit',
-                insight: `Profit ${excelMetrics.totalProfit > 0 ? 'positive' : 'negative'}`,
-                trend: excelMetrics.totalProfit > 0 ? 'up' : 'down',
-                value: `$${(excelMetrics.totalProfit / 1000000).toFixed(1)}B`,
-                priority: excelMetrics.totalProfit < 0 ? 'critical' : 'low',
-                icon: DollarSign,
-                bgColor: 'bg-emerald-50',
-                iconColor: 'text-emerald-700',
-                valueColor: excelMetrics.totalProfit > 0 ? 'text-green-600' : 'text-red-600',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
                 action: 'View Details',
                 category: 'Financial',
                 confidenceScore: 96,
-                dataSource: 'Excel Upload',
+                dataSource: 'Fact_Margin',
                 lastUpdated: 'Just now'
             });
         }
 
-        // Volume tile
-        if (excelMetrics.volume > 0) {
+        // Margin Percentage
+        if (excelMetrics.marginPct !== 0) {
+            const trend = excelMetrics.marginPctTrend || 0;
             insights.push({
                 id: idCounter++,
-                title: 'Production Volume',
-                kpi: `${(excelMetrics.volume / 1000).toFixed(1)}K`,
-                kpiLabel: 'Units Produced',
-                insight: `Volume tracking from Excel data`,
-                trend: 'up',
-                value: `+${((excelMetrics.volume / 1000) / 100).toFixed(1)}%`,
-                priority: 'low',
-                icon: Package,
-                bgColor: 'bg-teal-50',
-                iconColor: 'text-teal-700',
-                valueColor: 'text-green-600',
-                action: 'View Details',
-                category: 'Volume',
-                confidenceScore: 97,
-                dataSource: 'Excel Upload',
-                lastUpdated: 'Just now'
-            });
-        }
-
-        // Sales tile
-        if (excelMetrics.sales > 0) {
-            insights.push({
-                id: idCounter++,
-                title: 'Total Sales',
-                kpi: `$${(excelMetrics.sales / 1000000).toFixed(1)}B`,
-                kpiLabel: 'Sales Revenue',
-                insight: `Sales performance from data`,
-                trend: 'up',
-                value: `+${excelMetrics.revenueTrend.toFixed(1)}%`,
-                priority: 'medium',
-                icon: BarChart3,
-                bgColor: 'bg-indigo-50',
-                iconColor: 'text-indigo-700',
-                valueColor: 'text-green-600',
-                action: 'View Details',
-                category: 'Sales',
-                confidenceScore: 93,
-                dataSource: 'Excel Upload',
-                lastUpdated: 'Just now'
-            });
-        }
-
-        // Operational Efficiency tile
-        if (excelMetrics.operationalTotal > 0) {
-            insights.push({
-                id: idCounter++,
-                title: 'Operational Performance',
-                kpi: `$${(excelMetrics.operationalTotal / 1000000).toFixed(2)}B`,
-                kpiLabel: 'Operational Metrics',
-                insight: `Operational metrics from Excel`,
-                trend: 'up',
-                value: '+2.5%',
-                priority: 'medium',
+                title: 'Margin %',
+                kpi: `${Math.round(excelMetrics.marginPct)}%`,
+                kpiLabel: 'Margin Percentage',
+                insight: `Profitability ratio`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: excelMetrics.marginPct < 5 ? 'critical' : 'medium',
                 icon: Target,
                 bgColor: 'bg-purple-50',
                 iconColor: 'text-purple-700',
-                valueColor: 'text-green-600',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
                 action: 'View Details',
-                category: 'Operations',
-                confidenceScore: 92,
-                dataSource: 'Excel Upload',
+                category: 'Financial',
+                confidenceScore: 94,
+                dataSource: 'Fact_Margin',
                 lastUpdated: 'Just now'
             });
         }
 
-        // Add top Level 1 nodes as insights
-        excelMetrics.level1Nodes.slice(0, 8).forEach((node, index) => {
-            const nodeValue = node.accountingAmount || node.rateAmount || 0;
-            if (nodeValue !== 0) {
-                insights.push({
-                    id: idCounter++,
-                    title: node.name,
-                    kpi: node.rateAmount ? `${(node.rateAmount * 100).toFixed(1)}%` : `$${(nodeValue / 1000000).toFixed(2)}B`,
-                    kpiLabel: node.name,
-                    insight: `${node.name} from driver tree`,
-                    trend: nodeValue > 0 ? 'up' : 'down',
-                    value: node.rateAmount ? `${(node.rateAmount * 100).toFixed(1)}%` : `$${(nodeValue / 1000000).toFixed(2)}B`,
-                    priority: Math.abs(nodeValue) > 1000000 ? 'high' : 'medium',
-                    icon: index % 2 === 0 ? BarChart3 : LineChart,
-                    bgColor: index % 3 === 0 ? 'bg-blue-50' : index % 3 === 1 ? 'bg-purple-50' : 'bg-indigo-50',
-                    iconColor: index % 3 === 0 ? 'text-blue-700' : index % 3 === 1 ? 'text-purple-700' : 'text-indigo-700',
-                    valueColor: nodeValue > 0 ? 'text-green-600' : 'text-red-600',
-                    action: 'View Details',
-                    category: 'Driver Tree',
-                    confidenceScore: 90,
-                    dataSource: 'Excel Upload',
-                    lastUpdated: 'Just now'
-                });
-            }
-        });
-
-        // If we have fewer insights than default, pad with defaults
-        if (insights.length < 8) {
-            insights.push(...personalizedInsights.slice(0, 8 - insights.length));
+        // Key Operational Metrics (Second Row)
+        // AUM - Show in Billions
+        if (excelMetrics.totalAUM > 0) {
+            const trend = excelMetrics.aumTrend || 0;
+            const aumInBillions = excelMetrics.totalAUM / 1000; // Convert MM to B
+            insights.push({
+                id: idCounter++,
+                title: 'AUM',
+                kpi: `$${aumInBillions.toFixed(1)}B`,
+                kpiLabel: 'Assets Under Management',
+                insight: `Total assets under management`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'high',
+                icon: Building,
+                bgColor: 'bg-indigo-50',
+                iconColor: 'text-indigo-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Assets',
+                confidenceScore: 97,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
         }
 
-        return insights.slice(0, 14); // Limit to 14 tiles
+        // Trading Volume
+        if (excelMetrics.totalTradingVolume > 0) {
+            const trend = excelMetrics.tradingVolumeTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Trading Volume',
+                kpi: `$${Math.round(excelMetrics.totalTradingVolume)}MM`,
+                kpiLabel: 'Trading Volume',
+                insight: `Total trading volume`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: BarChart3,
+                bgColor: 'bg-teal-50',
+                iconColor: 'text-teal-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Trading',
+                confidenceScore: 96,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Headcount
+        if (excelMetrics.totalHeadcount > 0) {
+            const trend = excelMetrics.headcountTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Headcount',
+                kpi: `${Math.round(excelMetrics.totalHeadcount)}`,
+                kpiLabel: 'Headcount FTE',
+                insight: `Full-time equivalent employees`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Users,
+                bgColor: 'bg-amber-50',
+                iconColor: 'text-amber-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Operations',
+                confidenceScore: 98,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Revenue Components (Third Row)
+        // Transaction Fees
+        if (excelMetrics.totalTransactionFees > 0) {
+            const trend = excelMetrics.transactionFeesTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Transaction Fees',
+                kpi: `$${Math.round(excelMetrics.totalTransactionFees)}MM`,
+                kpiLabel: 'Transaction Fees Revenue',
+                insight: `Revenue from transaction fees`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: DollarSign,
+                bgColor: 'bg-emerald-50',
+                iconColor: 'text-emerald-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Revenue',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Custody Safekeeping
+        if (excelMetrics.totalCustodySafekeeping > 0) {
+            const trend = excelMetrics.custodySafekeepingTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Custody Safekeeping',
+                kpi: `$${Math.round(excelMetrics.totalCustodySafekeeping)}MM`,
+                kpiLabel: 'Custody Safekeeping Revenue',
+                insight: `Revenue from custody services`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Package,
+                bgColor: 'bg-cyan-50',
+                iconColor: 'text-cyan-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Revenue',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Admin Fund Expense
+        if (excelMetrics.totalAdminFundExpense > 0) {
+            const trend = excelMetrics.adminFundExpenseTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Admin Fund Expense',
+                kpi: `$${Math.round(excelMetrics.totalAdminFundExpense)}MM`,
+                kpiLabel: 'Admin Fund Expense Revenue',
+                insight: `Revenue from fund administration`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Building,
+                bgColor: 'bg-violet-50',
+                iconColor: 'text-violet-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Revenue',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Performance Fees
+        if (excelMetrics.totalPerformanceFees > 0) {
+            const trend = excelMetrics.performanceFeesTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Performance Fees',
+                kpi: `$${Math.round(excelMetrics.totalPerformanceFees)}MM`,
+                kpiLabel: 'Performance Fees Revenue',
+                insight: `Revenue from performance-based fees`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: TrendingUp,
+                bgColor: 'bg-pink-50',
+                iconColor: 'text-pink-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Revenue',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Interest Rate Revenue
+        if (excelMetrics.totalInterestRateRevenue > 0) {
+            const trend = excelMetrics.interestRateRevenueTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Interest Rate Revenue',
+                kpi: `$${Math.round(excelMetrics.totalInterestRateRevenue)}MM`,
+                kpiLabel: 'Interest Rate Revenue',
+                insight: `Revenue from interest rates`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: LineChart,
+                bgColor: 'bg-rose-50',
+                iconColor: 'text-rose-700',
+                valueColor: trend >= 0 ? 'text-green-600' : 'text-red-600',
+                action: 'View Details',
+                category: 'Revenue',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Expense Components (Fourth Row)
+        // Comp Benefits
+        if (excelMetrics.totalCompBenefits > 0) {
+            const trend = excelMetrics.compBenefitsTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Compensation & Benefits',
+                kpi: `$${Math.round(excelMetrics.totalCompBenefits)}MM`,
+                kpiLabel: 'Compensation & Benefits',
+                insight: `Employee compensation costs`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'high',
+                icon: Users,
+                bgColor: 'bg-orange-50',
+                iconColor: 'text-orange-700',
+                valueColor: trend >= 0 ? 'text-red-600' : 'text-green-600',
+                action: 'View Details',
+                category: 'Expense',
+                confidenceScore: 96,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Tech and Data
+        if (excelMetrics.totalTechData > 0) {
+            const trend = excelMetrics.techDataTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Tech & Data',
+                kpi: `$${Math.round(excelMetrics.totalTechData)}MM`,
+                kpiLabel: 'Technology & Data Expense',
+                insight: `Technology and data infrastructure costs`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Brain,
+                bgColor: 'bg-slate-50',
+                iconColor: 'text-slate-700',
+                valueColor: trend >= 0 ? 'text-red-600' : 'text-green-600',
+                action: 'View Details',
+                category: 'Expense',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Sales & Marketing
+        if (excelMetrics.totalSalesMktg > 0) {
+            const trend = excelMetrics.salesMktgTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Sales & Marketing',
+                kpi: `$${Math.round(excelMetrics.totalSalesMktg)}MM`,
+                kpiLabel: 'Sales & Marketing Expense',
+                insight: `Sales and marketing costs`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Target,
+                bgColor: 'bg-fuchsia-50',
+                iconColor: 'text-fuchsia-700',
+                valueColor: trend >= 0 ? 'text-red-600' : 'text-green-600',
+                action: 'View Details',
+                category: 'Expense',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        // Ops Prof Services
+        if (excelMetrics.totalOpsProfSvcs > 0) {
+            const trend = excelMetrics.opsProfSvcsTrend || 0;
+            insights.push({
+                id: idCounter++,
+                title: 'Ops & Prof Services',
+                kpi: `$${Math.round(excelMetrics.totalOpsProfSvcs)}MM`,
+                kpiLabel: 'Operations & Professional Services',
+                insight: `Operations and professional services costs`,
+                trend: trend >= 0 ? 'up' : 'down',
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: 'medium',
+                icon: Clock,
+                bgColor: 'bg-stone-50',
+                iconColor: 'text-stone-700',
+                valueColor: trend >= 0 ? 'text-red-600' : 'text-green-600',
+                action: 'View Details',
+                category: 'Expense',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            });
+        }
+
+        return insights; // Return all tiles from Fact_Margin data
     }, [excelMetrics]);
 
     const handleInsightClick = (insight: any) => {
@@ -2915,8 +3135,20 @@ export default function HomePage() {
             {/* Personalized Business Insights Grid */}
             <div className="px-8 pb-12">
                 <div className="max-w-7xl mx-auto">
-                    <div className="mb-6">
+                    <div className="mb-6 flex items-center justify-between">
                         <h3 className="text-lg font-semibold text-navy-900">Your Personalized AI-driven Insights & Actions</h3>
+                        {excelMetrics && excelMetrics.latestQuarter && (
+                            <div className="text-sm text-gray-600 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
+                                <span className="font-medium">Period Comparison: </span>
+                                <span>{excelMetrics.latestQuarter}</span>
+                                {excelMetrics.previousQuarter && (
+                                    <>
+                                        <span className="mx-2">vs</span>
+                                        <span>{excelMetrics.previousQuarter}</span>
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
