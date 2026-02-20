@@ -441,7 +441,8 @@ export default function HomePage() {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
                             factMarginRecords: parsed.factMarginRecords || [],
-                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))])),
+                            namingConventionRecords: parsed.namingConventionRecords || []
                         };
                         setExcelData(restoredData);
                     }
@@ -456,6 +457,152 @@ export default function HomePage() {
 
     // Generate personalized insights from Excel data
     const excelMetrics = useMemo(() => extractExecutiveSummaryMetrics(excelData), [excelData]);
+    
+    // Helper to get Report naming from NamingConvention based on Fact_Margin field name
+    const getReportNaming = (factMarginFieldName: string): string => {
+        if (!excelData?.namingConventionRecords || excelData.namingConventionRecords.length === 0) {
+            return factMarginFieldName; // Fallback to field name
+        }
+        
+        // Find column names
+        const findColumnName = (records: any[], possibleNames: string[]): string | null => {
+            if (records.length === 0) return null;
+            const firstRecord = records[0];
+            const keys = Object.keys(firstRecord);
+            for (const name of possibleNames) {
+                const found = keys.find(k => k.toLowerCase() === name.toLowerCase());
+                if (found) return found;
+            }
+            return null;
+        };
+        
+        const factMarginNamingCol = findColumnName(excelData.namingConventionRecords, [
+            'Fact_Margin Naming', 'Fact_Margin naming', 'Fact Margin Naming', 
+            'Fact Margin naming', 'Naming', 'Field Name', 'Fact_Margin Field Name'
+        ]);
+        const reportNamingCol = findColumnName(excelData.namingConventionRecords, [
+            'Report Naming', 'Report naming', 'Report Naming Column', 'Report Field Name'
+        ]);
+        
+        if (!factMarginNamingCol || !reportNamingCol) {
+            return factMarginFieldName;
+        }
+        
+        // Find matching record
+        const normalizeFieldName = (name: string) => {
+            return name.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        };
+        
+        const targetNormalized = normalizeFieldName(factMarginFieldName);
+        for (const record of excelData.namingConventionRecords) {
+            const factMarginNaming = String(record[factMarginNamingCol] || '').trim();
+            const factMarginNormalized = normalizeFieldName(factMarginNaming);
+            
+            if (factMarginNormalized === targetNormalized || 
+                factMarginNormalized.includes(targetNormalized) || 
+                targetNormalized.includes(factMarginNormalized)) {
+                const reportNaming = String(record[reportNamingCol] || '').trim();
+                if (reportNaming) {
+                    return reportNaming;
+                }
+            }
+        }
+        
+        return factMarginFieldName; // Fallback
+    };
+    
+    // Helper to get field value from Fact_Margin record (reuse from scenario-modeling)
+    const getFieldValue = (record: any, fieldName: string): number | null => {
+        if (!record || !fieldName) return null;
+        
+        const normalizeFieldName = (name: string) => {
+            return name.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+        };
+        
+        const targetNormalized = normalizeFieldName(fieldName);
+        
+        // Try exact match first
+        for (const [key, value] of Object.entries(record)) {
+            const keyLower = key.toLowerCase();
+            if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+            
+            const keyNormalized = normalizeFieldName(key);
+            if (keyNormalized === targetNormalized) {
+                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(numValue)) {
+                    return numValue;
+                }
+            }
+        }
+        
+        // Try partial match
+        for (const [key, value] of Object.entries(record)) {
+            const keyLower = key.toLowerCase();
+            if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+            
+            const keyNormalized = normalizeFieldName(key);
+            if (keyNormalized.includes(targetNormalized) || targetNormalized.includes(keyNormalized)) {
+                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(numValue)) {
+                    return numValue;
+                }
+            }
+        }
+        
+        return null;
+    };
+    
+    // Helper to get max quarter value and trend vs quarter-1 for a field
+    const getKPIValueAndTrend = (fieldName: string): { value: number; trend: number; maxQuarter: string; prevQuarter: string | null } => {
+        if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
+        }
+        
+        // Group records by quarter
+        const quarterData: { [quarter: string]: number[] } = {};
+        const quarters: string[] = [];
+        
+        excelData.factMarginRecords.forEach(record => {
+            const quarterKey = Object.keys(record).find(key => key.toLowerCase() === 'quarter');
+            if (!quarterKey || !record[quarterKey]) return;
+            
+            const quarter = String(record[quarterKey]).trim();
+            if (!quarter) return;
+            
+            const fieldValue = getFieldValue(record, fieldName);
+            if (fieldValue !== null && !isNaN(fieldValue)) {
+                if (!quarterData[quarter]) {
+                    quarterData[quarter] = [];
+                    quarters.push(quarter);
+                }
+                quarterData[quarter].push(fieldValue);
+            }
+        });
+        
+        if (quarters.length === 0) {
+            return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
+        }
+        
+        // Sort quarters and get max quarter
+        const sortedQuarters = quarters.sort();
+        const maxQuarter = sortedQuarters[sortedQuarters.length - 1];
+        const maxQuarterIndex = sortedQuarters.indexOf(maxQuarter);
+        const prevQuarter = maxQuarterIndex > 0 ? sortedQuarters[maxQuarterIndex - 1] : null;
+        
+        // Calculate max quarter value (sum all records for that quarter)
+        const maxQuarterValue = quarterData[maxQuarter]?.reduce((sum, val) => sum + val, 0) || 0;
+        const prevQuarterValue = prevQuarter ? (quarterData[prevQuarter]?.reduce((sum, val) => sum + val, 0) || 0) : 0;
+        
+        // Calculate trend percentage
+        const trend = prevQuarterValue !== 0 ? ((maxQuarterValue - prevQuarterValue) / Math.abs(prevQuarterValue)) * 100 : 0;
+        
+        return {
+            value: maxQuarterValue,
+            trend: trend,
+            maxQuarter: maxQuarter,
+            prevQuarter: prevQuarter
+        };
+    };
     
     const dynamicInsights = useMemo(() => {
         if (!excelMetrics) {
@@ -3974,334 +4121,739 @@ export default function HomePage() {
         }
     };
 
+    // Build KPI tile for a field
+    const buildKPITile = (fieldName: string, icon: any, bgColor: string, iconColor: string) => {
+        const kpiData = getKPIValueAndTrend(fieldName);
+        const reportNaming = getReportNaming(fieldName);
+        const trend = kpiData.trend;
+        const trendDirection = trend >= 0 ? 'up' : 'down';
+        const valueColor = trend >= 0 ? 'text-green-600' : 'text-red-600';
+        
+        // Format value based on field type
+        let formattedValue = '';
+        if (fieldName.includes('_pct') || fieldName.includes('_bps')) {
+            formattedValue = `${kpiData.value.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
+        } else if (fieldName.includes('_$mm')) {
+            formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
+        } else if (fieldName.includes('FTE') || fieldName.includes('Fte')) {
+            formattedValue = `${kpiData.value.toFixed(0)} FTE`;
+        } else {
+            formattedValue = `$${kpiData.value.toFixed(2)}`;
+        }
+        
+        const Icon = icon;
+        
+        return {
+            id: fieldName,
+            title: reportNaming,
+            kpi: formattedValue,
+            kpiLabel: reportNaming,
+            insight: `${kpiData.maxQuarter} vs ${kpiData.prevQuarter || 'N/A'}`,
+            trend: trendDirection,
+            value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+            priority: Math.abs(trend) > 10 ? 'high' : Math.abs(trend) > 5 ? 'medium' : 'low',
+            icon: Icon,
+            bgColor: bgColor,
+            iconColor: iconColor,
+            valueColor: valueColor,
+            action: 'View Details',
+            category: 'KPI',
+            confidenceScore: 95,
+            dataSource: 'Fact_Margin',
+            lastUpdated: 'Just now'
+        };
+    };
+    
+    // Build KPI clusters
+    const kpiClusters = useMemo(() => {
+        if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            return {
+                increaseVolumes: [],
+                workforceManagement: [],
+                minimizeExpenses: [],
+                optimizeRates: []
+            };
+        }
+        
+        // Helper functions need to be inside useMemo to access excelData
+        const getReportNaming = (factMarginFieldName: string): string => {
+            if (!excelData?.namingConventionRecords || excelData.namingConventionRecords.length === 0) {
+                return factMarginFieldName;
+            }
+            
+            const findColumnName = (records: any[], possibleNames: string[]): string | null => {
+                if (records.length === 0) return null;
+                const firstRecord = records[0];
+                const keys = Object.keys(firstRecord);
+                for (const name of possibleNames) {
+                    const found = keys.find(k => k.toLowerCase() === name.toLowerCase());
+                    if (found) return found;
+                }
+                return null;
+            };
+            
+            const factMarginNamingCol = findColumnName(excelData.namingConventionRecords, [
+                'Fact_Margin Naming', 'Fact_Margin naming', 'Fact Margin Naming', 
+                'Fact Margin naming', 'Naming', 'Field Name', 'Fact_Margin Field Name'
+            ]);
+            const reportNamingCol = findColumnName(excelData.namingConventionRecords, [
+                'Report Naming', 'Report naming', 'Report Naming Column', 'Report Field Name'
+            ]);
+            
+            if (!factMarginNamingCol || !reportNamingCol) {
+                return factMarginFieldName;
+            }
+            
+            const normalizeFieldName = (name: string) => {
+                return name.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            };
+            
+            const targetNormalized = normalizeFieldName(factMarginFieldName);
+            for (const record of excelData.namingConventionRecords) {
+                const factMarginNaming = String(record[factMarginNamingCol] || '').trim();
+                const factMarginNormalized = normalizeFieldName(factMarginNaming);
+                
+                if (factMarginNormalized === targetNormalized || 
+                    factMarginNormalized.includes(targetNormalized) || 
+                    targetNormalized.includes(factMarginNormalized)) {
+                    const reportNaming = String(record[reportNamingCol] || '').trim();
+                    if (reportNaming) {
+                        return reportNaming;
+                    }
+                }
+            }
+            
+            return factMarginFieldName;
+        };
+        
+        const getFieldValue = (record: any, fieldName: string): number | null => {
+            if (!record || !fieldName) return null;
+            
+            const normalizeFieldName = (name: string) => {
+                return name.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            };
+            
+            const targetNormalized = normalizeFieldName(fieldName);
+            
+            for (const [key, value] of Object.entries(record)) {
+                const keyLower = key.toLowerCase();
+                if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+                
+                const keyNormalized = normalizeFieldName(key);
+                if (keyNormalized === targetNormalized) {
+                    const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                    if (!isNaN(numValue)) {
+                        return numValue;
+                    }
+                }
+            }
+            
+            for (const [key, value] of Object.entries(record)) {
+                const keyLower = key.toLowerCase();
+                if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+                
+                const keyNormalized = normalizeFieldName(key);
+                if (keyNormalized.includes(targetNormalized) || targetNormalized.includes(keyNormalized)) {
+                    const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                    if (!isNaN(numValue)) {
+                        return numValue;
+                    }
+                }
+            }
+            
+            return null;
+        };
+        
+        const getKPIValueAndTrend = (fieldName: string): { value: number; trend: number; maxQuarter: string; prevQuarter: string | null } => {
+            if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+                return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
+            }
+            
+            const quarterData: { [quarter: string]: number[] } = {};
+            const quarters: string[] = [];
+            
+            excelData.factMarginRecords.forEach(record => {
+                const quarterKey = Object.keys(record).find(key => key.toLowerCase() === 'quarter');
+                if (!quarterKey || !record[quarterKey]) return;
+                
+                const quarter = String(record[quarterKey]).trim();
+                if (!quarter) return;
+                
+                const fieldValue = getFieldValue(record, fieldName);
+                if (fieldValue !== null && !isNaN(fieldValue)) {
+                    if (!quarterData[quarter]) {
+                        quarterData[quarter] = [];
+                        quarters.push(quarter);
+                    }
+                    quarterData[quarter].push(fieldValue);
+                }
+            });
+            
+            if (quarters.length === 0) {
+                return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
+            }
+            
+            const sortedQuarters = quarters.sort();
+            const maxQuarter = sortedQuarters[sortedQuarters.length - 1];
+            const maxQuarterIndex = sortedQuarters.indexOf(maxQuarter);
+            const prevQuarter = maxQuarterIndex > 0 ? sortedQuarters[maxQuarterIndex - 1] : null;
+            
+            const maxQuarterValue = quarterData[maxQuarter]?.reduce((sum, val) => sum + val, 0) || 0;
+            const prevQuarterValue = prevQuarter ? (quarterData[prevQuarter]?.reduce((sum, val) => sum + val, 0) || 0) : 0;
+            
+            const trend = prevQuarterValue !== 0 ? ((maxQuarterValue - prevQuarterValue) / Math.abs(prevQuarterValue)) * 100 : 0;
+            
+            return {
+                value: maxQuarterValue,
+                trend: trend,
+                maxQuarter: maxQuarter,
+                prevQuarter: prevQuarter
+            };
+        };
+        
+        const buildKPITile = (fieldName: string, icon: any, bgColor: string, iconColor: string) => {
+            const kpiData = getKPIValueAndTrend(fieldName);
+            const reportNaming = getReportNaming(fieldName);
+            const trend = kpiData.trend;
+            const trendDirection = trend >= 0 ? 'up' : 'down';
+            const valueColor = trend >= 0 ? 'text-green-600' : 'text-red-600';
+            
+            let formattedValue = '';
+            if (fieldName.includes('_pct') || fieldName.includes('_bps')) {
+                formattedValue = `${kpiData.value.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
+            } else if (fieldName.includes('_$mm')) {
+                // For TransactionRevenue and AcquisitionCostPerClient, use more appropriate units
+                if (fieldName.toLowerCase().includes('transactionrevenue') || fieldName.toLowerCase().includes('acquisitioncostperclient')) {
+                    // If value is less than 1 million (1000 in thousands), show in thousands
+                    // Otherwise show in millions with more precision
+                    if (kpiData.value < 1000) {
+                        formattedValue = `$${kpiData.value.toFixed(1)}K`;
+                    } else if (kpiData.value < 1000000) {
+                        // Show in thousands for values between 1K and 1M
+                        formattedValue = `$${(kpiData.value / 1000).toFixed(1)}K`;
+                    } else {
+                        formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
+                    }
+                } else {
+                    formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
+                }
+            } else if (fieldName.includes('FTE') || fieldName.includes('Fte')) {
+                formattedValue = `${kpiData.value.toFixed(0)} FTE`;
+            } else {
+                formattedValue = `$${kpiData.value.toFixed(2)}`;
+            }
+            
+            return {
+                id: fieldName,
+                title: reportNaming,
+                kpi: formattedValue,
+                kpiLabel: reportNaming,
+                insight: `${kpiData.maxQuarter} vs ${kpiData.prevQuarter || 'N/A'}`,
+                trend: trendDirection,
+                trendPercent: Math.abs(trend), // Store the absolute trend percentage for visualizations
+                value: `${trend >= 0 ? '+' : ''}${trend.toFixed(1)}%`,
+                priority: Math.abs(trend) > 10 ? 'high' : Math.abs(trend) > 5 ? 'medium' : 'low',
+                icon: icon,
+                bgColor: bgColor,
+                iconColor: iconColor,
+                valueColor: valueColor,
+                action: 'View Details',
+                category: 'KPI',
+                confidenceScore: 95,
+                dataSource: 'Fact_Margin',
+                lastUpdated: 'Just now'
+            };
+        };
+        
+        return {
+            increaseVolumes: [
+                buildKPITile('AvgAUM_$mm', BarChart3, 'bg-blue-50', 'text-blue-700'),
+                buildKPITile('NetFlows_$mm', TrendingUp, 'bg-green-50', 'text-green-700'),
+                buildKPITile('MarketReturn_pct', LineChart, 'bg-purple-50', 'text-purple-700'),
+                buildKPITile('TradingVolume_$mm', BarChart3, 'bg-indigo-50', 'text-indigo-700')
+            ],
+            workforceManagement: [
+                buildKPITile('Headcount FTE', Users, 'bg-orange-50', 'text-orange-700'),
+                buildKPITile('TotalCompensation_$mm', DollarSign, 'bg-pink-50', 'text-pink-700')
+            ],
+            minimizeExpenses: [
+                buildKPITile('AcquisitionCostPerClient_$mm', Target, 'bg-red-50', 'text-red-700'),
+                buildKPITile('ApplicationSpend_$mm', Package, 'bg-amber-50', 'text-amber-700')
+            ],
+            optimizeRates: [
+                buildKPITile('AdvisoryFeeRate_pct', DollarSign, 'bg-teal-50', 'text-teal-700'),
+                buildKPITile('AdvisoryRevenue_$mm', TrendingUp, 'bg-cyan-50', 'text-cyan-700'),
+                buildKPITile('AvgFeePerTrade_pct', BarChart3, 'bg-emerald-50', 'text-emerald-700'),
+                buildKPITile('TransactionRevenue_$mm', DollarSign, 'bg-sky-50', 'text-sky-700')
+            ]
+        };
+    }, [excelData]);
+    
     return (
         <div className="flex-1">
-            {/* Hero Section with lots of negative space */}
-            <div className="bg-white px-8 py-12">
-                <div className="max-w-4xl mx-auto text-center">
-                    {/* User Profile */}
-                    <div className="mb-8">
-                        <div className="relative w-32 h-32 mx-auto mb-4">
-                            {/* Global Finance Logo */}
-                            <div className="w-full h-full rounded-full overflow-hidden shadow-xl border-4 border-white bg-white p-3">
-                                <img
-                                    src="/logo.svg"
-                                    alt="Global Finance Logo"
-                                    className="w-full h-full object-contain"
-                                />
+            {/* Hero Section - Redesigned with smaller logo and search bar higher */}
+            <div className="bg-white px-8 py-6">
+                <div className="max-w-7xl mx-auto">
+                    <div className="flex items-center justify-between mb-6">
+                        {/* User Profile with smaller logo */}
+                        <div className="flex items-center space-x-4">
+                            <div className="relative w-16 h-16">
+                                {/* Global Finance Logo - Reduced size */}
+                                <div className="w-full h-full rounded-full overflow-hidden shadow-lg border-2 border-white bg-white p-2">
+                                    <img
+                                        src="/logo.svg"
+                                        alt="Global Finance Logo"
+                                        className="w-full h-full object-contain"
+                                    />
+                                </div>
+                                {/* Online indicator */}
+                                <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
                             </div>
-                            {/* Online indicator */}
-                            <div className="absolute bottom-2 right-2 w-6 h-6 bg-green-500 rounded-full border-4 border-white"></div>
+                            <div>
+                                <h2 className="text-2xl font-bold text-navy-900">Hi Sarah,</h2>
+                                <p className="text-sm text-gray-600">Here's your executive overview for today</p>
+                            </div>
                         </div>
-                        <h2 className="text-3xl font-bold text-navy-900">Hi Sarah,</h2>
-                        <p className="text-gray-600 mt-2">Here's your executive overview for today</p>
-                    </div>
-
-                    {/* AI Search Bar */}
-                    <div className="relative max-w-2xl mx-auto">
-                        <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                        <input
-                            type="text"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            onKeyPress={handleKeyPress}
-                            onFocus={() => setIsSearchFocused(true)}
-                            onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
-                            placeholder="Ask me anything about your business..."
-                            className="w-full pl-14 pr-6 py-4 text-lg bg-gray-50 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        />
-                        <button
-                            onClick={handleAISearch}
-                            disabled={isSearching || !searchQuery.trim()}
-                            className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-2 rounded-full hover:shadow-lg hover:shadow-green-500/50 transition-all border border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {isSearching ? (
-                                <div className="flex items-center space-x-2">
-                                    <div className="w-4 h-4 border-2 border-navy-900 border-t-transparent rounded-full animate-spin"></div>
-                                    <span>Analyzing...</span>
-                                </div>
-                            ) : (
-                                'Search'
-                            )}
-                        </button>
-                    </div>
-
-                    {/* Example queries - only show when search is focused */}
-                    <AnimatePresence>
-                        {isSearchFocused && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                transition={{ duration: 0.2 }}
-                                className="mt-4 space-y-2"
+                        
+                        {/* AI Search Bar - Moved higher and smaller */}
+                        <div className="relative max-w-xl flex-1 ml-8">
+                            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyPress={handleKeyPress}
+                                onFocus={() => setIsSearchFocused(true)}
+                                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                                placeholder="Ask me anything about your business..."
+                                className="w-full pl-11 pr-20 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                            />
+                            <button
+                                onClick={handleAISearch}
+                                disabled={isSearching || !searchQuery.trim()}
+                                className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-1.5 rounded-full hover:shadow-lg hover:shadow-green-500/50 transition-all border border-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
                             >
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    <span className="text-xs text-gray-500">Popular:</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('Why is market share declining?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "Why is market share declining?"
-                                    </button>
-                                    <span className="text-xs text-gray-400">•</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('How is our EBIT margin trending?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "How is our EBIT margin trending?"
-                                    </button>
-                                    <span className="text-xs text-gray-400">•</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('What is our cash flow position?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "What is our cash flow position?"
-                                    </button>
-                                </div>
-                                <div className="flex flex-wrap justify-center gap-2">
-                                    <span className="text-xs text-gray-500">Also try:</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('How is manufacturing quality?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "How is manufacturing quality?"
-                                    </button>
-                                    <span className="text-xs text-gray-400">•</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('What are our top risks?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "What are our top risks?"
-                                    </button>
-                                    <span className="text-xs text-gray-400">•</span>
-                                    <button
-                                        onClick={() => {
-                                            setSearchQuery('What is our product mix?');
-                                            setTimeout(handleAISearch, 100);
-                                        }}
-                                        className="text-xs text-purple-600 hover:text-purple-700 underline"
-                                    >
-                                        "What is our product mix?"
-                                    </button>
-                                </div>
-                                <div className="flex flex-wrap justify-center gap-2 text-xs text-gray-400 mt-1">
-                                    <span>More: pricing • volume • inventory • capital • competitors • warranties • digital services • ESG</span>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                                {isSearching ? (
+                                    <div className="flex items-center space-x-1">
+                                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                        <span>Analyzing...</span>
+                                    </div>
+                                ) : (
+                                    'Search'
+                                )}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Personalized Business Insights Grid */}
-            <div className="px-8 pb-12">
+            {/* KPI Clusters Grid */}
+            <div className="px-8 pb-12 bg-gray-50">
                 <div className="max-w-7xl mx-auto">
-                    <div className="mb-6 flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-navy-900">Your Personalized AI-driven Insights & Actions</h3>
-                        {excelMetrics && excelMetrics.latestQuarter && (
-                            <div className="text-sm text-gray-600 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200">
-                                <span className="font-medium">Period Comparison: </span>
-                                <span>{excelMetrics.latestQuarter}</span>
-                                {excelMetrics.previousQuarter && (
-                                    <>
-                                        <span className="mx-2">vs</span>
-                                        <span>{excelMetrics.previousQuarter}</span>
-                                    </>
-                                )}
+                    {/* Top Row - Clusters 1 and 2 */}
+                    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-8">
+                        {/* Cluster 1: Increase Volumes - Top Left */}
+                        <div className="bg-gray-100/50 rounded-xl p-6 border border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Increase Volumes</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {kpiClusters.increaseVolumes.map((insight) => {
+                                    const Icon = insight.icon;
+                                    return (
+                                        <motion.div
+                                            key={insight.id}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => handleInsightClick(insight)}
+                                            className="bg-white rounded-xl shadow-sm hover:shadow-lg hover:shadow-purple-100 transition-all cursor-pointer border border-gray-100 hover:border-purple-200 relative overflow-hidden min-h-[200px] flex flex-col"
+                                        >
+                                            {/* Status indicator bar at top */}
+                                            <div className={`absolute top-0 left-0 right-0 h-1 ${insight.priority === 'critical' ? 'bg-red-500' :
+                                                insight.priority === 'high' ? 'bg-green-500' :
+                                                    'bg-gray-300'
+                                                }`} />
+
+                                            <div className="p-4 flex flex-col flex-1">
+                                                {/* Header with icon and trend */}
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
+                                                        <Icon className={`w-4 h-4 ${insight.iconColor}`} />
+                                                    </div>
+                                                    <div className="flex items-center space-x-1 flex-shrink-0">
+                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                            {insight.value}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Large KPI Display */}
+                                                <div className="mb-3">
+                                                    <h4 className="text-xl font-bold text-navy-900 leading-tight">{insight.kpi}</h4>
+                                                    <p className="text-xs font-medium text-gray-700 mt-0.5 line-clamp-1">{insight.kpiLabel}</p>
+                                                </div>
+
+                                                {/* Mini visualization - Different styles based on KPI type */}
+                                                <div className="h-12 mb-3 flex items-center">
+                                                    {insight.kpiLabel.toLowerCase().includes('headcount') || insight.kpiLabel.toLowerCase().includes('fte') ? (
+                                                        // Bar chart for Headcount
+                                                        <div className="w-full h-full flex items-end justify-between gap-1 px-2">
+                                                            {[60, 70, 80, 85, 90].map((height, idx) => (
+                                                                <div 
+                                                                    key={idx} 
+                                                                    className={`flex-1 rounded-t ${insight.trend === 'up' ? 'bg-green-400' : 'bg-red-400'}`}
+                                                                    style={{ height: `${height}%` }}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                        ) : insight.kpiLabel.toLowerCase().includes('rate') || insight.kpiLabel.toLowerCase().includes('pct') || insight.kpiLabel.toLowerCase().includes('%') ? (
+                                                        // Circular progress for rates/percentages
+                                                        <div className="w-12 h-12 mx-auto">
+                                                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke="#e5e7eb"
+                                                                    strokeWidth="2"
+                                                                />
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                    strokeDasharray={`${Math.min((insight as any).trendPercent || 0, 100)}, 100`}
+                                                                    strokeLinecap="round"
+                                                                />
+                                                            </svg>
+                                                        </div>
+                                                    ) : (
+                                                        // Line chart for other metrics
+                                                        <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
+                                                            <polyline
+                                                                points={insight.trend === 'up' ? "2,20 10,18 18,16 26,14 34,10 42,8 50,6 58,4" : "2,4 10,6 18,8 26,10 34,14 42,16 50,18 58,20"}
+                                                                fill="none"
+                                                                stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                strokeWidth="2"
+                                                            />
+                                                        </svg>
+                                                    )}
+                                                </div>
+
+                                                {/* Insight text */}
+                                                <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
                             </div>
-                        )}
+                        </div>
+                        
+                        {/* Cluster 2: Workforce Management - Top Right */}
+                        <div className="bg-gray-100/50 rounded-xl p-6 border border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Workforce Management</h3>
+                            <div className="grid grid-cols-1 gap-4">
+                                {kpiClusters.workforceManagement.map((insight) => {
+                                    const Icon = insight.icon;
+                                    return (
+                                        <motion.div
+                                            key={insight.id}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => handleInsightClick(insight)}
+                                            className="bg-white rounded-xl shadow-sm hover:shadow-lg hover:shadow-purple-100 transition-all cursor-pointer border border-gray-100 hover:border-purple-200 relative overflow-hidden min-h-[200px] flex flex-col"
+                                        >
+                                            {/* Status indicator bar at top */}
+                                            <div className={`absolute top-0 left-0 right-0 h-1 ${insight.priority === 'critical' ? 'bg-red-500' :
+                                                insight.priority === 'high' ? 'bg-green-500' :
+                                                    'bg-gray-300'
+                                                }`} />
+
+                                            <div className="p-4 flex flex-col flex-1">
+                                                {/* Header with icon and trend */}
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
+                                                        <Icon className={`w-4 h-4 ${insight.iconColor}`} />
+                                                    </div>
+                                                    <div className="flex items-center space-x-1 flex-shrink-0">
+                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                            {insight.value}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Large KPI Display */}
+                                                <div className="mb-3">
+                                                    <h4 className="text-xl font-bold text-navy-900 leading-tight">{insight.kpi}</h4>
+                                                    <p className="text-xs font-medium text-gray-700 mt-0.5 line-clamp-1">{insight.kpiLabel}</p>
+                                                </div>
+
+                                                {/* Mini visualization - Different styles based on KPI type */}
+                                                <div className="h-12 mb-3 flex items-center">
+                                                    {insight.kpiLabel.toLowerCase().includes('headcount') || insight.kpiLabel.toLowerCase().includes('fte') ? (
+                                                        // Bar chart for Headcount
+                                                        <div className="w-full h-full flex items-end justify-between gap-1 px-2">
+                                                            {[60, 70, 80, 85, 90].map((height, idx) => (
+                                                                <div 
+                                                                    key={idx} 
+                                                                    className={`flex-1 rounded-t ${insight.trend === 'up' ? 'bg-green-400' : 'bg-red-400'}`}
+                                                                    style={{ height: `${height}%` }}
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                        ) : insight.kpiLabel.toLowerCase().includes('rate') || insight.kpiLabel.toLowerCase().includes('pct') || insight.kpiLabel.toLowerCase().includes('%') ? (
+                                                        // Circular progress for rates/percentages
+                                                        <div className="w-12 h-12 mx-auto">
+                                                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke="#e5e7eb"
+                                                                    strokeWidth="2"
+                                                                />
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                    strokeDasharray={`${Math.min((insight as any).trendPercent || 0, 100)}, 100`}
+                                                                    strokeLinecap="round"
+                                                                />
+                                                            </svg>
+                                                        </div>
+                                                    ) : (
+                                                        // Line chart for other metrics
+                                                        <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
+                                                            <polyline
+                                                                points={insight.trend === 'up' ? "2,20 10,18 18,16 26,14 34,10 42,8 50,6 58,4" : "2,4 10,6 18,8 26,10 34,14 42,16 50,18 58,20"}
+                                                                fill="none"
+                                                                stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                strokeWidth="2"
+                                                            />
+                                                        </svg>
+                                                    )}
+                                                </div>
+
+                                                {/* Insight text */}
+                                                <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
+                    
+                    {/* Bottom Row - Clusters 3 and 4 */}
+                    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-8 mt-8">
+                        {/* Cluster 3: Optimize Rates - Bottom Left (swapped) */}
+                        <div className="bg-gray-100/50 rounded-xl p-6 border border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Optimize Rates</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {kpiClusters.optimizeRates.map((insight) => {
+                                    const Icon = insight.icon;
+                                    return (
+                                        <motion.div
+                                            key={insight.id}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => handleInsightClick(insight)}
+                                            className="bg-white rounded-xl shadow-sm hover:shadow-lg hover:shadow-purple-100 transition-all cursor-pointer border border-gray-100 hover:border-purple-200 relative overflow-hidden min-h-[200px] flex flex-col"
+                                        >
+                                            {/* Status indicator bar at top */}
+                                            <div className={`absolute top-0 left-0 right-0 h-1 ${insight.priority === 'critical' ? 'bg-red-500' :
+                                                insight.priority === 'high' ? 'bg-green-500' :
+                                                    'bg-gray-300'
+                                                }`} />
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
-                        {dynamicInsights.map((insight) => {
-                            const Icon = insight.icon;
-                            return (
-                                <motion.div
-                                    key={insight.id}
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    onClick={() => handleInsightClick(insight)}
-                                    className="bg-white rounded-xl shadow-sm hover:shadow-lg hover:shadow-purple-100 transition-all cursor-pointer border border-gray-100 hover:border-purple-200 relative overflow-hidden min-h-[280px] flex flex-col"
-                                >
-                                    {/* Status indicator bar at top */}
-                                    <div className={`absolute top-0 left-0 right-0 h-1 ${insight.priority === 'critical' ? 'bg-red-500' :
-                                        insight.priority === 'high' ? 'bg-green-500' :
-                                            'bg-gray-300'
-                                        }`} />
-
-                                    <div className="p-4 flex flex-col flex-1">
-                                        {/* Header with icon and trend */}
-                                        <div className="flex items-start justify-between mb-3">
-                                            <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
-                                                <Icon className={`w-4 h-4 ${insight.iconColor}`} />
-                                            </div>
-                                            <div className="flex items-center space-x-1 flex-shrink-0">
-                                                {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
-                                                {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-                                                <span className={`text-xs font-bold ${insight.valueColor}`}>
-                                                    {insight.value}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        {/* Large KPI Display */}
-                                        <div className="mb-3">
-                                            <h4 className="text-xl font-bold text-navy-900 leading-tight">{insight.kpi}</h4>
-                                            <p className="text-xs font-medium text-gray-700 mt-0.5 line-clamp-1">{insight.kpiLabel}</p>
-                                        </div>
-
-                                        {/* Mini visualization */}
-                                        <div className="h-12 mb-3 flex items-center">
-                                            {/* Context-specific visualizations */}
-                                            {insight.kpiLabel.includes('Market Share') && (
-                                                <div className="w-8 h-8 rounded-full border-4 border-gray-200 relative">
-                                                    <div
-                                                        className="absolute inset-0 rounded-full bg-red-400"
-                                                        style={{ clipPath: 'polygon(50% 50%, 50% 0%, 18.2% 0%, 0% 0%, 0% 100%, 100% 100%, 100% 0%, 50% 0%)' }}
-                                                    />
+                                            <div className="p-4 flex flex-col flex-1">
+                                                {/* Header with icon and trend */}
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
+                                                        <Icon className={`w-4 h-4 ${insight.iconColor}`} />
+                                                    </div>
+                                                    <div className="flex items-center space-x-1 flex-shrink-0">
+                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                            {insight.value}
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                            )}
 
-                                            {insight.kpiLabel.includes('EV Mix') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    <div className="w-3 h-3 bg-gray-300 rounded-sm" />
-                                                    <div className="w-3 h-4 bg-gray-300 rounded-sm" />
-                                                    <div className="w-3 h-5 bg-gray-300 rounded-sm" />
-                                                    <div className="w-3 h-6 bg-gray-300 rounded-sm" />
-                                                    <div className="w-3 h-5 bg-yellow-400 rounded-sm" />
+                                                    {/* Large KPI Display */}
+                                                    <div className="mb-3">
+                                                        <h4 className="text-xl font-bold text-navy-900 leading-tight">{insight.kpi}</h4>
+                                                        <p className="text-xs font-medium text-gray-700 mt-0.5 line-clamp-1">{insight.kpiLabel}</p>
+                                                    </div>
+
+                                                    {/* Mini visualization - Different styles based on KPI type */}
+                                                    <div className="h-12 mb-3 flex items-center">
+                                                        {insight.kpiLabel.toLowerCase().includes('headcount') || insight.kpiLabel.toLowerCase().includes('fte') ? (
+                                                            // Bar chart for Headcount
+                                                            <div className="w-full h-full flex items-end justify-between gap-1 px-2">
+                                                                {[60, 70, 80, 85, 90].map((height, idx) => (
+                                                                    <div 
+                                                                        key={idx} 
+                                                                        className={`flex-1 rounded-t ${insight.trend === 'up' ? 'bg-green-400' : 'bg-red-400'}`}
+                                                                        style={{ height: `${height}%` }}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        ) : insight.kpiLabel.toLowerCase().includes('rate') || insight.kpiLabel.toLowerCase().includes('pct') || insight.kpiLabel.toLowerCase().includes('%') ? (
+                                                        // Circular progress for rates/percentages
+                                                        <div className="w-12 h-12 mx-auto">
+                                                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke="#e5e7eb"
+                                                                    strokeWidth="2"
+                                                                />
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                    strokeDasharray={`${Math.min((insight as any).trendPercent || 0, 100)}, 100`}
+                                                                    strokeLinecap="round"
+                                                                />
+                                                            </svg>
+                                                        </div>
+                                                        ) : (
+                                                            // Line chart for other metrics
+                                                            <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
+                                                                <polyline
+                                                                    points={insight.trend === 'up' ? "2,20 10,18 18,16 26,14 34,10 42,8 50,6 58,4" : "2,4 10,6 18,8 26,10 34,14 42,16 50,18 58,20"}
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Insight text */}
+                                                    <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                                 </div>
-                                            )}
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                        </div>
+                        
+                        {/* Cluster 4: Minimize Expenses - Bottom Right (swapped) */}
+                        <div className="bg-gray-100/50 rounded-xl p-6 border border-gray-200">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Minimize Expenses</h3>
+                            <div className="grid grid-cols-1 gap-4">
+                                    {kpiClusters.minimizeExpenses.map((insight) => {
+                                        const Icon = insight.icon;
+                                        return (
+                                            <motion.div
+                                                key={insight.id}
+                                                whileHover={{ scale: 1.02 }}
+                                                whileTap={{ scale: 0.98 }}
+                                                onClick={() => handleInsightClick(insight)}
+                                                className="bg-white rounded-xl shadow-sm hover:shadow-lg hover:shadow-purple-100 transition-all cursor-pointer border border-gray-100 hover:border-purple-200 relative overflow-hidden min-h-[200px] flex flex-col"
+                                            >
+                                                {/* Status indicator bar at top */}
+                                                <div className={`absolute top-0 left-0 right-0 h-1 ${insight.priority === 'critical' ? 'bg-red-500' :
+                                                    insight.priority === 'high' ? 'bg-green-500' :
+                                                        'bg-gray-300'
+                                                    }`} />
 
-                                            {(insight.kpiLabel.includes('Revenue') || insight.kpiLabel.includes('Rising')) && (
-                                                <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
-                                                    <polyline
-                                                        points="2,20 10,18 18,16 26,14 34,10 42,8 50,6 58,4"
-                                                        fill="none"
-                                                        stroke="#10b981"
-                                                        strokeWidth="2"
-                                                    />
-                                                </svg>
-                                            )}
+                                                <div className="p-4 flex flex-col flex-1">
+                                                    {/* Header with icon and trend */}
+                                                    <div className="flex items-start justify-between mb-3">
+                                                        <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
+                                                            <Icon className={`w-4 h-4 ${insight.iconColor}`} />
+                                                        </div>
+                                                        <div className="flex items-center space-x-1 flex-shrink-0">
+                                                            {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                            {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                            <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                                {insight.value}
+                                                            </span>
+                                                        </div>
+                                                    </div>
 
-                                            {insight.kpiLabel.includes('Digital') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[40, 50, 60, 80, 100].map((height, idx) => (
-                                                        <div key={idx} className="w-2.5 bg-green-400 rounded-t" style={{ height: `${height}%` }} />
-                                                    ))}
+                                                    {/* Large KPI Display */}
+                                                    <div className="mb-3">
+                                                        <h4 className="text-xl font-bold text-navy-900 leading-tight">{insight.kpi}</h4>
+                                                        <p className="text-xs font-medium text-gray-700 mt-0.5 line-clamp-1">{insight.kpiLabel}</p>
+                                                    </div>
+
+                                                    {/* Mini visualization - Different styles based on KPI type */}
+                                                    <div className="h-12 mb-3 flex items-center">
+                                                        {insight.kpiLabel.toLowerCase().includes('headcount') || insight.kpiLabel.toLowerCase().includes('fte') ? (
+                                                            // Bar chart for Headcount
+                                                            <div className="w-full h-full flex items-end justify-between gap-1 px-2">
+                                                                {[60, 70, 80, 85, 90].map((height, idx) => (
+                                                                    <div 
+                                                                        key={idx} 
+                                                                        className={`flex-1 rounded-t ${insight.trend === 'up' ? 'bg-green-400' : 'bg-red-400'}`}
+                                                                        style={{ height: `${height}%` }}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        ) : insight.kpiLabel.toLowerCase().includes('rate') || insight.kpiLabel.toLowerCase().includes('pct') || insight.kpiLabel.toLowerCase().includes('%') ? (
+                                                        // Circular progress for rates/percentages
+                                                        <div className="w-12 h-12 mx-auto">
+                                                            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke="#e5e7eb"
+                                                                    strokeWidth="2"
+                                                                />
+                                                                <circle
+                                                                    cx="18"
+                                                                    cy="18"
+                                                                    r="16"
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                    strokeDasharray={`${Math.min((insight as any).trendPercent || 0, 100)}, 100`}
+                                                                    strokeLinecap="round"
+                                                                />
+                                                            </svg>
+                                                        </div>
+                                                        ) : (
+                                                            // Line chart for other metrics
+                                                            <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
+                                                                <polyline
+                                                                    points={insight.trend === 'up' ? "2,20 10,18 18,16 26,14 34,10 42,8 50,6 58,4" : "2,4 10,6 18,8 26,10 34,14 42,16 50,18 58,20"}
+                                                                    fill="none"
+                                                                    stroke={insight.trend === 'up' ? "#10b981" : "#ef4444"}
+                                                                    strokeWidth="2"
+                                                                />
+                                                            </svg>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Insight text */}
+                                                    <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                                 </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Production') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[60, 70, 80, 85, 88].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx === 4 ? 'bg-green-500' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Manufacturing Excellence') && (
-                                                <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                                                    <span className="text-xs font-bold text-green-700">92%</span>
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('EBIT') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[100, 90, 80, 85, 88].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx >= 3 ? 'bg-yellow-400' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Supply Chain Crisis') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[100, 100, 100, 80, 60].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx >= 3 ? 'bg-red-400' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Service Revenue') && (
-                                                <div className="w-10 h-10 rounded-full bg-green-100">
-                                                    <div className="w-full h-full rounded-full bg-green-400" style={{ clipPath: 'polygon(50% 50%, 50% 0%, 100% 0%, 100% 100%, 72% 100%)' }} />
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Capital') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[40, 50, 60, 70, 75].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx === 4 ? 'bg-green-500' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Cost Per') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[40, 50, 60, 80, 85].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx >= 3 ? 'bg-yellow-400' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Safety') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[95, 96, 97, 98, 98].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx === 4 ? 'bg-green-500' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('Competitive Position') && (
-                                                <div className="flex space-x-0.5 items-end h-full">
-                                                    {[100, 90, 80, 70, 60].map((height, idx) => (
-                                                        <div key={idx} className={`w-2.5 rounded-t ${idx === 2 ? 'bg-blue-500' : 'bg-gray-300'}`} style={{ height: `${height}%` }} />
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {insight.kpiLabel.includes('EV Transition') && (
-                                                <svg className="w-full h-full" viewBox="0 0 60 24" preserveAspectRatio="none">
-                                                    <path
-                                                        d="M 2,20 Q 10,18 18,16 T 34,12 Q 42,10 50,8 T 58,4"
-                                                        fill="none"
-                                                        stroke="#3b82f6"
-                                                        strokeWidth="2"
-                                                    />
-                                                </svg>
-                                            )}
-                                        </div>
-
-                                        {/* Insight text */}
-                                        <p className="text-xs text-gray-600 mb-3 line-clamp-2 flex-grow">{insight.insight}</p>
-
-                                        {/* Footer with category and action - moved to bottom */}
-                                        <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-auto">
-                                            <span className="text-xs text-gray-500">{insight.category}</span>
-                                            <button className="text-xs font-medium text-purple-600 hover:text-purple-700 flex items-center">
-                                                {insight.action}
-                                                <ArrowRight className="w-3 h-3 ml-0.5" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                </motion.div>
-                            );
-                        })}
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                        </div>
                     </div>
                 </div>
             </div>
