@@ -8,6 +8,7 @@ export interface StoredExcelData {
         accountingFacts: [string, any[]][];
         factMarginRecords: any[];
         dimensionTables: { [key: string]: { [id: string]: any } };
+        namingConventionRecords?: any[]; // Records from NamingConvention tab
     };
     uploadedAt: string;
     uploadedBy?: string;

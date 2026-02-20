@@ -13,7 +13,7 @@ import {
     ChevronDown,
     ChevronRight
 } from 'lucide-react';
-import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames, FactMarginRecord } from '@/lib/excel-parser';
+import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames, FactMarginRecord, NamingConventionRecord } from '@/lib/excel-parser';
 
 interface PnLLineItem {
     label: string;
@@ -51,7 +51,8 @@ export default function OperationalPerformance() {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
                             factMarginRecords: parsed.factMarginRecords || [],
-                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))])),
+                            namingConventionRecords: parsed.namingConventionRecords || []
                         };
                         setExcelData(restoredData);
                     }
@@ -157,6 +158,24 @@ export default function OperationalPerformance() {
         const targetNormalized = normalizeFieldName(fieldName);
         const targetCoreWords = extractCoreWords(fieldName);
         
+        // Strategy 0: Try exact match first (case-insensitive)
+        // This is the most reliable - field names from NamingConvention should match Fact_Margin exactly
+        for (const [key, value] of Object.entries(record)) {
+            const keyLower = key.toLowerCase().trim();
+            const fieldNameLower = fieldName.toLowerCase().trim();
+            
+            // Skip ID, period, date, and quarter fields
+            if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date') || keyLower.includes('quarter')) continue;
+            
+            // Exact match (case-insensitive)
+            if (keyLower === fieldNameLower) {
+                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(numValue)) {
+                    return numValue;
+                }
+            }
+        }
+        
         // Strategy 1: Try exact normalized match (case-insensitive, no special chars, no units)
         // Example: "Total Revenue" -> "totalrevenue", "TotalRevenue_$mm" -> "totalrevenue"
         for (const [key, value] of Object.entries(record)) {
@@ -256,37 +275,203 @@ export default function OperationalPerformance() {
         return null;
     };
 
-    // P&L Line Items Structure
-    // fieldName uses "Report Field Name" from mapping table, which maps to "Fact_Margin Field Name" via fuzzy matching
-    // Example: "TotalRevenue" (report) → "TotalRevenue_$mm" (fact margin)
-    // Structure matches hierarchy: TotalRevenue/TotalExpense → Detail items
-    // Note: Margin and Margin % are displayed on the Geography header row, not as separate line items
-    const pnlLineItems: PnLLineItem[] = [
-        // Revenue Section
-        { label: 'Revenue', fieldName: '', isTotal: true, indent: 0 },
-        { label: 'Total Revenue', fieldName: 'TotalRevenue', isTotal: true, indent: 1 }, // Maps to TotalRevenue_$mm
-        { label: 'Rev Transaction Fees', fieldName: 'Rev Transaction Fees', indent: 2 }, // Maps to Rev_TransactionalFees_$mm
-        { label: 'Rev CustodySafekeeping', fieldName: 'Rev CustodySafekeeping', indent: 2 }, // Maps to Rev_CustodySafekeeping_$mm
-        { label: 'AdminFundExpense', fieldName: 'AdminFundExpense', indent: 2 }, // Maps to Rev_AdminFundExpense_$mm
-        { label: 'PerformanceFees', fieldName: 'PerformanceFees', indent: 2 }, // Maps to Rev_PerformanceFees_$mm
-        { label: 'Interest Rate Revenue', fieldName: 'Interest Rate Revenue', indent: 2 }, // Maps to Rev_InterestRateRevenue_$mm
+    // Build P&L Line Items Structure dynamically from NamingConvention
+    // Filters by Category = 'Financial Result' and structures by P&L Impact (Revenue, Expense, Margin)
+    const pnlLineItems: PnLLineItem[] = useMemo(() => {
+        const items: PnLLineItem[] = [];
         
-        // Expense Section
-        { label: 'Expenses', fieldName: '', isTotal: true, indent: 0 },
-        { label: 'Total Expense', fieldName: 'Total Expense', isTotal: true, indent: 1 }, // Maps to TotalExpense_$mm
-        { label: 'Exp_CompBenefits', fieldName: 'Exp_CompBenefits', indent: 2 }, // Maps to Exp_CompBenefits_$mm
-        { label: 'Exp_Tech and Data', fieldName: 'Exp_Tech and Data', indent: 2 }, // Maps to Exp_TechData_$mm
-        { label: 'Exp_SalesMktg', fieldName: 'Exp_SalesMktg', indent: 2 }, // Maps to Exp_SalesMktg_$mm
-        { label: 'Exp_OpsProfSvcs', fieldName: 'Exp_OpsProfSvcs', indent: 2 }, // Maps to Exp_OpsProfSvcs_$mm
-    ];
+        if (!excelData?.namingConventionRecords || excelData.namingConventionRecords.length === 0) {
+            // Fallback to empty structure if no NamingConvention data
+            return [];
+        }
+
+        // Find column names in NamingConvention (case-insensitive)
+        const findColumnName = (records: NamingConventionRecord[], possibleNames: string[]): string | null => {
+            if (records.length === 0) return null;
+            const firstRecord = records[0];
+            const keys = Object.keys(firstRecord);
+            
+            for (const possibleName of possibleNames) {
+                const found = keys.find(k => k.toLowerCase() === possibleName.toLowerCase());
+                if (found) return found;
+            }
+            return null;
+        };
+
+        const factMarginNamingCol = findColumnName(excelData.namingConventionRecords, [
+            'Fact_Margin Naming', 'Fact_Margin naming', 'Fact Margin Naming', 
+            'Fact Margin naming', 'Naming', 'Field Name', 'Fact_Margin Field Name'
+        ]);
+        const categoryCol = findColumnName(excelData.namingConventionRecords, [
+            'Category', 'category'
+        ]);
+        const plImpactCol = findColumnName(excelData.namingConventionRecords, [
+            'P&L Impact', 'P&L impact', 'P and L Impact', 'PL Impact', 'PL impact'
+        ]);
+
+        if (!factMarginNamingCol) {
+            console.warn('NamingConvention: Fact_Margin naming column not found');
+            return [];
+        }
+
+        // Filter records where Category = 'Financial Result'
+        const financialResultRecords = excelData.namingConventionRecords.filter(record => {
+            if (!categoryCol) return true; // Include all if no category column
+            const category = String(record[categoryCol] || '').trim();
+            return category.toLowerCase() === 'financial result';
+        });
+
+        if (financialResultRecords.length === 0) {
+            console.warn('NamingConvention: No records with Category = "Financial Result" found');
+            return [];
+        }
+
+        // Group by P&L Impact
+        const revenueItems: PnLLineItem[] = [];
+        const expenseItems: PnLLineItem[] = [];
+        const marginItems: PnLLineItem[] = [];
+
+        // Track compensation fields for hierarchy
+        const compensationFields = new Map<string, PnLLineItem>();
+        let totalCompensationItem: PnLLineItem | null = null;
+
+        financialResultRecords.forEach(record => {
+            const fieldName = String(record[factMarginNamingCol] || '').trim();
+            if (!fieldName) return;
+
+            // Skip TotalRevenue_$mm and TotalExpense_$mm from detail items (they're totals, not details)
+            const fieldNameLower = fieldName.toLowerCase();
+            if (fieldNameLower === 'totalrevenue_$mm' || fieldNameLower === 'totalexpense_$mm') {
+                return; // Skip these - they're handled as totals, not detail items
+            }
+
+            // Get P&L Impact value
+            let plImpact = '';
+            if (plImpactCol) {
+                plImpact = String(record[plImpactCol] || '').trim().toLowerCase();
+            }
+
+            // Determine label (use field name or try to find a display name)
+            const label = fieldName; // Use field name as label, can be enhanced later
+
+            const lineItem: PnLLineItem = {
+                label: label,
+                fieldName: fieldName,
+                indent: 2, // Detail items are indent 2
+                isTotal: false
+            };
+
+            // Check if this is a compensation-related field for hierarchy
+            const isCompensationField = fieldNameLower === 'totalcompensation_$mm' || 
+                                       fieldNameLower === 'basecompensation_$mm' || 
+                                       fieldNameLower === 'variablecompensation_$mm';
+            
+            if (fieldNameLower === 'totalcompensation_$mm') {
+                totalCompensationItem = {
+                    label: 'Total Compensation',
+                    fieldName: fieldName,
+                    indent: 2,
+                    isTotal: true
+                };
+                // Don't add TotalCompensation_$mm to expenseItems - it will be added separately in hierarchy
+            } else if (fieldNameLower === 'basecompensation_$mm' || fieldNameLower === 'variablecompensation_$mm') {
+                compensationFields.set(fieldName, lineItem);
+                // Don't add these to expenseItems yet - they'll be added as nested items
+            } else {
+                // Only categorize non-compensation fields into revenue/expense items
+                // Categorize by P&L Impact
+                if (plImpact.includes('revenue') || plImpact === 'revenue') {
+                    revenueItems.push(lineItem);
+                } else if (plImpact.includes('expense') || plImpact === 'expense') {
+                    expenseItems.push(lineItem);
+                } else if (plImpact.includes('margin') || plImpact === 'margin') {
+                    marginItems.push(lineItem);
+                } else {
+                    // Default: if unclear, try to infer from field name
+                    if (fieldNameLower.includes('rev') || fieldNameLower.includes('revenue')) {
+                        revenueItems.push(lineItem);
+                    } else if (fieldNameLower.includes('exp') || fieldNameLower.includes('expense')) {
+                        expenseItems.push(lineItem);
+                    } else {
+                        // Default to expense if unclear
+                        expenseItems.push(lineItem);
+                    }
+                }
+            }
+        });
+
+        // Build structure: Section headers show totals directly, then details
+        // Note: TotalRevenue_$mm and TotalExpense_$mm come directly from Fact_Margin, not calculated
+        if (revenueItems.length > 0) {
+            // Revenue section header shows TotalRevenue_$mm value directly (no separate total row)
+            items.push({ label: 'Revenue', fieldName: 'TotalRevenue_$mm', isTotal: true, indent: 0 });
+            items.push(...revenueItems);
+        }
+
+        if (expenseItems.length > 0) {
+            // Expenses section header shows TotalExpense_$mm value directly (no separate total row)
+            items.push({ label: 'Expenses', fieldName: 'TotalExpense_$mm', isTotal: true, indent: 0 });
+            
+            // Remove compensation items from expenseItems (they'll be added in hierarchy)
+            const filteredExpenseItems = expenseItems.filter(item => {
+                const itemFieldLower = item.fieldName.toLowerCase();
+                return itemFieldLower !== 'basecompensation_$mm' && 
+                       itemFieldLower !== 'variablecompensation_$mm' &&
+                       itemFieldLower !== 'totalcompensation_$mm';
+            });
+            
+            // Add all expense items together (compensation hierarchy will be mixed in)
+            // First add non-compensation expenses
+            items.push(...filteredExpenseItems);
+            
+            // Then add compensation hierarchy if it exists (alongside other expenses)
+            if (totalCompensationItem) {
+                // Add TotalCompensation_$mm with indent 1 (same level as other expenses)
+                items.push({ ...totalCompensationItem, indent: 1 });
+                
+                // Add nested compensation items with indent 2 (under Total Compensation)
+                let baseComp: PnLLineItem | undefined;
+                let varComp: PnLLineItem | undefined;
+                
+                for (const [key, value] of compensationFields.entries()) {
+                    const keyLower = key.toLowerCase();
+                    if (keyLower === 'basecompensation_$mm') {
+                        baseComp = value;
+                    } else if (keyLower === 'variablecompensation_$mm') {
+                        varComp = value;
+                    }
+                }
+                
+                if (baseComp) {
+                    items.push({ ...baseComp, indent: 2 });
+                }
+                if (varComp) {
+                    items.push({ ...varComp, indent: 2 });
+                }
+            }
+        }
+
+        // Margin items would be added here if needed, but Margin is calculated, not from individual fields
+        // Margin = Total Revenue - Total Expense
+
+        console.log('=== P&L Line Items Built ===');
+        console.log('Total items:', items.length);
+        console.log('Revenue items:', revenueItems.length);
+        console.log('Expense items:', expenseItems.length);
+        console.log('Field names to match:', items.filter(i => i.fieldName).map(i => i.fieldName));
+        
+        return items;
+    }, [excelData]);
 
     // Calculate P&L data based on selected dimensions and available periods (quarters)
     const pnlData = useMemo(() => {
         console.log('=== P&L Data Calculation Start ===');
         console.log('excelData exists:', !!excelData);
         console.log('factMarginRecords count:', excelData?.factMarginRecords?.length || 0);
+        console.log('namingConventionRecords count:', excelData?.namingConventionRecords?.length || 0);
         console.log('availablePeriods:', availablePeriods);
         console.log('selectedDimensions:', selectedDimensions);
+        console.log('pnlLineItems count:', pnlLineItems.length);
         
         if (!excelData || 
             !excelData.factMarginRecords || 
@@ -294,6 +479,11 @@ export default function OperationalPerformance() {
             excelData.factMarginRecords.length === 0 || 
             availablePeriods.length === 0) {
             console.warn('Missing data - returning empty P&L');
+            return {} as PnLData;
+        }
+
+        if (pnlLineItems.length === 0) {
+            console.warn('No P&L line items found - check NamingConvention data');
             return {} as PnLData;
         }
 
@@ -307,8 +497,18 @@ export default function OperationalPerformance() {
             
             // Debug: Log first record to see structure
             if (excelData.factMarginRecords.length > 0) {
-                console.log('First Fact_Margin record:', excelData.factMarginRecords[0]);
-                console.log('Available fields in first record:', Object.keys(excelData.factMarginRecords[0]));
+                const firstRecord = excelData.factMarginRecords[0];
+                console.log('First Fact_Margin record:', firstRecord);
+                const allFields = Object.keys(firstRecord);
+                console.log('All fields in first record:', allFields);
+                const dataFields = allFields.filter(k => 
+                    !k.toLowerCase().includes('id') && 
+                    !k.toLowerCase().includes('period') && 
+                    !k.toLowerCase().includes('date') && 
+                    !k.toLowerCase().includes('quarter')
+                );
+                console.log('Data fields (non-ID, non-period):', dataFields);
+                console.log('Fields we are trying to match:', pnlLineItems.filter(i => i.fieldName).map(i => i.fieldName));
             }
             
             // Get dimension values for selected dimensions
@@ -399,10 +599,15 @@ export default function OperationalPerformance() {
             availablePeriods.forEach(period => {
                 data[rowKey][period] = {};
                 pnlLineItems.forEach(item => {
-                    if (item.fieldName && !item.isTotal && !item.isMargin) {
+                    // Initialize all fields including totals (TotalRevenue_$mm, TotalExpense_$mm)
+                    if (item.fieldName && !item.isMargin) {
                         data[rowKey][period][item.fieldName] = 0;
                     }
                 });
+                // Also initialize Margin and MarginPct
+                data[rowKey][period]['Margin'] = 0;
+                data[rowKey][period]['MarginPct'] = 0;
+                data[rowKey][period]['Margin_$mm'] = 0;
             });
         });
 
@@ -506,10 +711,10 @@ export default function OperationalPerformance() {
                         rowKey = 'Total';
                     }
 
-                    // Aggregate amounts for each line item
+                    // Aggregate amounts for each line item (including totals like TotalRevenue_$mm and TotalExpense_$mm)
                     let fieldsMatched = 0;
                     pnlLineItems.forEach(item => {
-                        if (!item.fieldName || item.isTotal || item.isMargin) return;
+                        if (!item.fieldName || item.isMargin) return; // Include totals, exclude margin (handled separately)
 
                         try {
                             // Try to find matching field in record using fuzzy matching
@@ -520,11 +725,45 @@ export default function OperationalPerformance() {
                                 if (!data[rowKey][period][item.fieldName]) data[rowKey][period][item.fieldName] = 0;
                                 data[rowKey][period][item.fieldName] += fieldValue;
                                 fieldsMatched++;
+                                
+                                // Log successful matches for first record
+                                if (recordIndex === 0) {
+                                    console.log(`✓ Matched "${item.fieldName}" = ${fieldValue}`);
+                                }
+                            } else if (recordIndex === 0) {
+                                // Log failed matches for first record
+                                console.warn(`✗ Failed to match "${item.fieldName}"`);
                             }
                         } catch (error) {
                             console.warn(`Error processing field ${item.fieldName}:`, error);
                         }
                     });
+                    
+                    // Also aggregate Margin_$mm and MarginPct if they exist in the record
+                    try {
+                        const marginValue = getFieldValue(record, 'Margin_$mm');
+                        if (marginValue !== null && !isNaN(marginValue)) {
+                            if (!data[rowKey]) data[rowKey] = {};
+                            if (!data[rowKey][period]) data[rowKey][period] = {};
+                            if (!data[rowKey][period]['Margin_$mm']) data[rowKey][period]['Margin_$mm'] = 0;
+                            data[rowKey][period]['Margin_$mm'] += marginValue;
+                        }
+                        
+                        // Try to get MarginPct (might be MarginPct, Margin_%, etc.)
+                        const marginPctValue = getFieldValue(record, 'MarginPct') || getFieldValue(record, 'Margin_%');
+                        if (marginPctValue !== null && !isNaN(marginPctValue)) {
+                            if (!data[rowKey]) data[rowKey] = {};
+                            if (!data[rowKey][period]) data[rowKey][period] = {};
+                            // Check if value is already a percentage (>= 1) or a decimal (< 1)
+                            // If it's already a percentage (e.g., 83 for 83%), use as-is
+                            // If it's a decimal (e.g., 0.83 for 83%), we'll handle in calculation step
+                            if (!data[rowKey][period]['MarginPct']) {
+                                data[rowKey][period]['MarginPct'] = marginPctValue;
+                            }
+                        }
+                    } catch (error) {
+                        // Ignore margin aggregation errors
+                    }
                     
                     if (recordIndex === 0 && fieldsMatched === 0) {
                         console.warn('=== FIELD MATCHING DEBUG (First Record) ===');
@@ -578,28 +817,39 @@ export default function OperationalPerformance() {
 
                         const periodData = data[rowKey][period];
 
-                        // Calculate Total Revenue - sum all revenue components
-                        const totalRevenue = 
-                            (periodData['Rev Transaction Fees'] || 0) +
-                            (periodData['Rev CustodySafekeeping'] || 0) +
-                            (periodData['AdminFundExpense'] || 0) +
-                            (periodData['PerformanceFees'] || 0) +
-                            (periodData['Interest Rate Revenue'] || 0);
-                        periodData['TotalRevenue'] = totalRevenue;
+                        // TotalRevenue_$mm and TotalExpense_$mm come directly from Fact_Margin data
+                        // They should already be populated from aggregation above
+                        const totalRevenue = periodData['TotalRevenue_$mm'] || 0;
+                        const totalExpense = periodData['TotalExpense_$mm'] || 0;
 
-                        // Calculate Total Expense - sum all expense components
-                        const totalExpense = 
-                            (periodData['Exp_CompBenefits'] || 0) +
-                            (periodData['Exp_Tech and Data'] || 0) +
-                            (periodData['Exp_SalesMktg'] || 0) +
-                            (periodData['Exp_OpsProfSvcs'] || 0);
-                        periodData['Total Expense'] = totalExpense; // Using "Total Expense" (with space) per mapping table
-
-                        // Calculate Margin
-                        periodData['Margin'] = totalRevenue - totalExpense;
-
-                        // Calculate Margin %
-                        periodData['MarginPct'] = totalRevenue !== 0 ? (periodData['Margin'] / totalRevenue) * 100 : 0;
+                        // Get Margin_$mm directly from Fact_Margin data (if available), otherwise calculate
+                        const marginFromData = periodData['Margin_$mm'] !== undefined ? periodData['Margin_$mm'] : null;
+                        const marginPctFromData = periodData['MarginPct'] !== undefined ? periodData['MarginPct'] : null;
+                        
+                        // Use Margin_$mm from source data if available, otherwise calculate
+                        if (marginFromData !== null && marginFromData !== 0) {
+                            periodData['Margin'] = marginFromData;
+                        } else {
+                            // Calculate Margin if not in source data
+                            periodData['Margin'] = totalRevenue - totalExpense;
+                        }
+                        
+                        // Use MarginPct from source data if available, otherwise calculate
+                        if (marginPctFromData !== null && marginPctFromData !== 0) {
+                            // Check if the value is already a percentage (>= 1) or a decimal (< 1)
+                            // If it's already a percentage (e.g., 83 for 83%), use as-is
+                            // If it's a decimal (e.g., 0.83 for 83%), multiply by 100
+                            if (Math.abs(marginPctFromData) >= 1) {
+                                // Already a percentage value (e.g., 83 means 83%)
+                                periodData['MarginPct'] = marginPctFromData;
+                            } else {
+                                // Decimal value (e.g., 0.83 means 83%), multiply by 100
+                                periodData['MarginPct'] = marginPctFromData * 100;
+                            }
+                        } else {
+                            // Calculate Margin % if not in source data
+                            periodData['MarginPct'] = totalRevenue !== 0 ? (periodData['Margin'] / totalRevenue) * 100 : 0;
+                        }
                     } catch (error) {
                         console.warn(`Error calculating totals for ${rowKey}, ${period}:`, error);
                     }
@@ -623,6 +873,13 @@ export default function OperationalPerformance() {
                             });
                         });
 
+                        // Calculate Margin and Margin % for grand total using direct values
+                        const grandTotalRevenue = totalData['TotalRevenue_$mm'] || 0;
+                        const grandTotalExpense = totalData['TotalExpense_$mm'] || 0;
+                        totalData['Margin'] = grandTotalRevenue - grandTotalExpense;
+                        // Calculate Margin % for grand total
+                        totalData['MarginPct'] = grandTotalRevenue !== 0 ? (totalData['Margin'] / grandTotalRevenue) * 100 : 0;
+
                         if (!data['Total']) data['Total'] = {};
                         data['Total'][period] = totalData;
                     } catch (error) {
@@ -636,7 +893,7 @@ export default function OperationalPerformance() {
             console.error('Error calculating P&L data:', error);
             return {} as PnLData;
         }
-    }, [excelData, selectedDimensions, availablePeriods]);
+    }, [excelData, selectedDimensions, availablePeriods, pnlLineItems]);
 
     const formatCurrency = (value: number): string => {
         if (Math.abs(value) >= 1000000) {
@@ -681,20 +938,11 @@ export default function OperationalPerformance() {
         let currentSectionHeader: PnLLineItem | null = null;
         
         pnlLineItems.forEach((item, index) => {
-            // Section headers (Revenue, Expenses) - always visible
-            if (item.isTotal && !item.fieldName) {
-                // Find the corresponding total line (next item that is a total with fieldName)
-                const nextItem = pnlLineItems[index + 1];
-                if (nextItem && nextItem.isTotal && nextItem.fieldName) {
-                    // Combine section header with total
-                    visible.push({
-                        ...nextItem,
-                        combineWithHeader: true,
-                        sectionHeader: item
-                    });
-                } else {
-                    visible.push(item);
-                }
+            // Section headers (Revenue, Expenses) - now have fieldNames (TotalRevenue_$mm, TotalExpense_$mm)
+            // They are always visible and show their values directly
+            if (item.isTotal && (item.indent === 0 || item.label === 'Revenue' || item.label === 'Expenses')) {
+                // Section headers are always visible and display their fieldName values
+                visible.push(item);
                 
                 if (item.label === 'Revenue') {
                     currentSection = 'Revenue';
@@ -704,16 +952,32 @@ export default function OperationalPerformance() {
                     currentSectionHeader = item;
                 }
             }
-            // Total lines (indent 1) - skip if already combined with header
+            // Total Compensation (indent 1) - only show if Expenses section is expanded
             else if (item.isTotal && item.fieldName && item.indent === 1) {
-                // Check if this was already added as combined
-                const alreadyAdded = visible.some(v => v.label === item.label && v.combineWithHeader);
-                if (!alreadyAdded) {
+                // Check if this is Total Compensation - it should be hidden when Expenses is collapsed
+                if (item.fieldName.toLowerCase().includes('totalcompensation')) {
+                    // Only show if Expenses section is expanded
+                    if (currentSection === 'Expenses' && expandedSections.has('Expenses')) {
+                        visible.push(item);
+                    }
+                } else {
+                    // Other indent 1 items (if any) - show if their section is expanded
+                    if (currentSection && expandedSections.has(currentSection)) {
+                        visible.push(item);
+                    }
+                }
+            }
+            // Compensation nested items (indent 2, under Total Compensation) - only show if Expenses is expanded
+            else if (item.indent === 2 && !item.isTotal && !item.isMargin && 
+                     (item.fieldName.toLowerCase().includes('basecompensation') || 
+                      item.fieldName.toLowerCase().includes('variablecompensation'))) {
+                // Only show if Expenses section is expanded
+                if (currentSection === 'Expenses' && expandedSections.has('Expenses')) {
                     visible.push(item);
                 }
             }
-            // Detail lines (indent 2) - only show if section is expanded
-            else if (item.indent === 2 && !item.isTotal && !item.isMargin) {
+            // Other detail lines (indent 2 or 3) - only show if section is expanded
+            else if ((item.indent === 2 || item.indent === 3) && !item.isTotal && !item.isMargin) {
                 if (currentSection && expandedSections.has(currentSection)) {
                     visible.push(item);
                 }
@@ -885,7 +1149,8 @@ export default function OperationalPerformance() {
                                         {/* P&L Line Items */}
                                         {getVisibleLineItems().map((item, idx) => {
                                             const isMarginSection = item.isMargin;
-                                            const isSectionHeader = item.isTotal && !item.fieldName;
+                                            // Section headers are items with isTotal and indent 0 (Revenue/Expenses)
+                                            const isSectionHeader = item.isTotal && (item.indent === 0 || item.label === 'Revenue' || item.label === 'Expenses');
                                             const isCombinedWithHeader = item.combineWithHeader && item.sectionHeader;
                                             
                                             // Determine if this is a collapsible section header
@@ -929,9 +1194,9 @@ export default function OperationalPerformance() {
                                                         </div>
                                                     </td>
                                                     {availablePeriods.map((period, periodIdx) => {
-                                                        // Use the item's fieldName (which will be the total field if combined)
-                                                        const fieldNameToUse = item.combineWithHeader ? item.fieldName : item.fieldName;
-                                                        const value = pnlData[rowKey]?.[period]?.[fieldNameToUse] || 0;
+                                                        // Use the item's fieldName - section headers now have fieldNames (TotalRevenue_$mm, TotalExpense_$mm)
+                                                        const fieldNameToUse = item.fieldName || (item.combineWithHeader ? item.fieldName : null);
+                                                        const value = fieldNameToUse ? (pnlData[rowKey]?.[period]?.[fieldNameToUse] || 0) : 0;
                                                         const displayValue = fieldNameToUse === 'MarginPct' 
                                                             ? formatPercentage(value)
                                                             : formatCurrency(value);
@@ -1011,7 +1276,19 @@ export default function OperationalPerformance() {
             {availablePeriods.length === 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
                     <p className="text-amber-800 font-medium">No quarters found in Fact_Margin data. Please ensure the 'Quarter' field exists in your Excel file.</p>
-                                    </div>
+                </div>
+            )}
+
+            {excelData && (!excelData.namingConventionRecords || excelData.namingConventionRecords.length === 0) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+                    <p className="text-amber-800 font-medium">NamingConvention tab not found in Excel file. Please ensure your Excel file contains a 'NamingConvention' sheet with field mappings.</p>
+                </div>
+            )}
+
+            {excelData && pnlLineItems.length === 0 && excelData.namingConventionRecords && excelData.namingConventionRecords.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+                    <p className="text-amber-800 font-medium">No fields found with Category = 'Financial Result' in NamingConvention. Please check your NamingConvention tab.</p>
+                </div>
             )}
 
             {!excelData && (
@@ -1022,3 +1299,4 @@ export default function OperationalPerformance() {
         </div>
     );
 }
+

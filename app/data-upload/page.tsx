@@ -24,7 +24,8 @@ export default function DataUploadPage() {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
                             factMarginRecords: parsed.factMarginRecords || [],
-                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))])),
+                            namingConventionRecords: parsed.namingConventionRecords || []
                         };
                         setExcelData(restoredData);
                         setUploadStatus('success');
@@ -53,7 +54,8 @@ export default function DataUploadPage() {
                         k,
                         Object.fromEntries(v.entries())
                     ])
-                )
+                ),
+                namingConventionRecords: data.namingConventionRecords || []
             };
 
             const response = await fetch('/api/excel-data', {

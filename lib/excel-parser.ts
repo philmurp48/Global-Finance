@@ -35,6 +35,11 @@ export interface DimensionRecord {
 // Map of dimension table name to records keyed by ID
 export type DimensionTables = Map<string, Map<string, DimensionRecord>>;
 
+// NamingConvention record - mapping table for field names
+export interface NamingConventionRecord {
+    [key: string]: any; // Dynamic fields including Fact_Margin naming, Category, P&L Impact
+}
+
 export interface ExcelDriverTreeData {
     tree: DriverTreeNode[];
     factMarginRecords: FactMarginRecord[]; // All records from Fact_Margin tab
@@ -42,6 +47,7 @@ export interface ExcelDriverTreeData {
     // Maps for aggregating amounts by driver (from Driver Level 4)
     accountingFacts: Map<string, PeriodData[]>; // Driver Level 4 name -> periods
     accountingFactRecords?: FactMarginRecord[]; // Full records for detailed analysis
+    namingConventionRecords?: NamingConventionRecord[]; // Records from NamingConvention tab
 }
 
 /**
@@ -97,6 +103,29 @@ export async function parseDriverTreeExcel(file: File): Promise<ExcelDriverTreeD
                 // Parse all DIM_... tabs
                 const dimensionTables = parseDimensionTables(workbook, XLSX);
 
+                // Parse NamingConvention tab (optional) - try multiple variations
+                const namingConventionSheet = workbook.Sheets['NamingConvention'] || 
+                                           workbook.Sheets['Naming Convention'] ||
+                                           workbook.Sheets['Naming_Convention'] ||
+                                           workbook.Sheets[workbook.SheetNames.find((name: string) => {
+                                               const nameLower = name.toLowerCase().trim();
+                                               return nameLower === 'namingconvention' || 
+                                                      nameLower === 'naming convention' ||
+                                                      nameLower === 'naming_convention' ||
+                                                      (nameLower.includes('naming') && nameLower.includes('convention'));
+                                           }) || ''];
+                
+                // Log available sheet names for debugging
+                console.log('Available Excel sheet names:', workbook.SheetNames);
+                if (namingConventionSheet) {
+                    console.log('✓ NamingConvention sheet found');
+                } else {
+                    console.warn('✗ NamingConvention sheet not found. Available sheets:', workbook.SheetNames);
+                }
+                
+                const namingConventionRecords = namingConventionSheet ? parseNamingConventionSheet(namingConventionSheet, XLSX) : [];
+                console.log(`Parsed ${namingConventionRecords.length} NamingConvention records`);
+
                 // Extract driver tree structure (Driver Level 1-4)
                 const tree = parseDriverTreeSheet(driverTreeSheet, XLSX);
                 
@@ -112,13 +141,18 @@ export async function parseDriverTreeExcel(file: File): Promise<ExcelDriverTreeD
                 // Map amounts to tree nodes
                 mapAmountsToTree(tree, accountingFacts);
 
-                resolve({
+                const result = {
                     tree,
                     factMarginRecords,
                     dimensionTables,
                     accountingFacts,
-                    accountingFactRecords: factMarginRecords
-                });
+                    accountingFactRecords: factMarginRecords,
+                    namingConventionRecords
+                };
+
+                console.log('Excel parsing complete. NamingConvention records:', namingConventionRecords.length);
+
+                resolve(result);
             } catch (error) {
                 reject(error);
             }
@@ -364,6 +398,41 @@ function parseFactMarginSheet(sheet: any, XLSX: any): FactMarginRecord[] {
 
         // Create record object with all fields
         const record: FactMarginRecord = {};
+        headerRow.forEach((header, index) => {
+            const headerStr = String(header).trim();
+            const value = row[index];
+            record[headerStr] = value;
+        });
+
+        records.push(record);
+    }
+
+    return records;
+}
+
+/**
+ * Parse NamingConvention sheet - mapping table for field names
+ */
+function parseNamingConventionSheet(sheet: any, XLSX: any): NamingConventionRecord[] {
+    const records: NamingConventionRecord[] = [];
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    if (!jsonData || jsonData.length === 0) {
+        return records;
+    }
+
+    const headerRow = jsonData[0] as any[];
+    if (!headerRow || headerRow.length === 0) {
+        return records;
+    }
+
+    // Process data rows
+    for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
+        if (!row || row.length === 0) continue;
+
+        // Create record object with all fields
+        const record: NamingConventionRecord = {};
         headerRow.forEach((header, index) => {
             const headerStr = String(header).trim();
             const value = row[index];
