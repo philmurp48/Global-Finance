@@ -758,9 +758,21 @@ export function joinFactWithDimension(
     dimensionTableName: string
 ): DimensionRecord | null {
     const idValue = factMarginRecord[idFieldName];
-    if (!idValue) return null;
+    if (!idValue && idValue !== 0) return null; // Allow 0 as valid ID
     
-    const dimensionTable = dimensionTables.get(dimensionTableName);
+    // Try exact table name first
+    let dimensionTable = dimensionTables.get(dimensionTableName);
+    
+    // If not found, try case-insensitive match
+    if (!dimensionTable) {
+        for (const [tableName, table] of dimensionTables.entries()) {
+            if (tableName.toLowerCase() === dimensionTableName.toLowerCase()) {
+                dimensionTable = table;
+                break;
+            }
+        }
+    }
+    
     if (!dimensionTable) return null;
     
     const idStr = String(idValue).trim();

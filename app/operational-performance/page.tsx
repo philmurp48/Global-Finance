@@ -323,11 +323,32 @@ export default function OperationalPerformance() {
                 
                 selectedDimensions.forEach(dimName => {
                     try {
-                        const idFieldName = dimName + 'ID';
+                        // Special handling for dimension ID field names
+                        let idFieldName: string;
+                        if (dimName === 'LineOfBusiness') {
+                            idFieldName = 'LOBID';
+                        } else {
+                            idFieldName = dimName + 'ID';
+                        }
+                        
                         const idValue = record[idFieldName];
                         if (idValue !== undefined && idValue !== null && idValue !== '') {
+                            // Try both Dim_ and DIM_ prefix for dimension table name
                             const dimTableName = `Dim_${dimName}`;
-                            const dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                            const dimTableNameUpper = `DIM_${dimName}`;
+                            
+                            // Try Dim_ first, then DIM_
+                            let dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                            if (!dimRecord) {
+                                dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableNameUpper);
+                            }
+                            
+                            // Debug logging for LineOfBusiness
+                            if (dimName === 'LineOfBusiness' && !dimRecord) {
+                                console.debug(`LineOfBusiness join failed: idFieldName=${idFieldName}, idValue=${idValue}, availableTables=`, 
+                                    Array.from(excelData.dimensionTables.keys()));
+                            }
+                            
                             if (dimRecord) {
                                 // Find the display field (usually name, description, or first non-ID field)
                                 const displayField = Object.keys(dimRecord).find(key => 
@@ -428,11 +449,25 @@ export default function OperationalPerformance() {
                         
                         selectedDimensions.forEach(dimName => {
                             try {
-                                const idFieldName = dimName + 'ID';
+                                // Special handling for dimension ID field names
+                                let idFieldName: string;
+                                if (dimName === 'LineOfBusiness') {
+                                    idFieldName = 'LOBID';
+                                } else {
+                                    idFieldName = dimName + 'ID';
+                                }
+                                
                                 const idValue = record[idFieldName];
                                 if (idValue !== undefined && idValue !== null && idValue !== '') {
+                                    // Try both Dim_ and DIM_ prefix for dimension table name
                                     const dimTableName = `Dim_${dimName}`;
-                                    const dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                                    const dimTableNameUpper = `DIM_${dimName}`;
+                                    
+                                    // Try Dim_ first, then DIM_
+                                    let dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                                    if (!dimRecord) {
+                                        dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableNameUpper);
+                                    }
                                     if (dimRecord) {
                                         const displayField = Object.keys(dimRecord).find(key => 
                                             !key.toLowerCase().includes('id') && 
