@@ -1,0 +1,36 @@
+<svg width="200" height="120" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120">
+  <!-- Globe Background Circle -->
+  <circle cx="100" cy="45" r="32" fill="none" stroke="#1e3a8a" stroke-width="2.5"/>
+  
+  <!-- Meridians/Longitude lines for globe effect -->
+  <ellipse cx="100" cy="45" rx="32" ry="11" fill="none" stroke="#1e3a8a" stroke-width="2"/>
+  <ellipse cx="100" cy="45" rx="11" ry="32" fill="none" stroke="#1e3a8a" stroke-width="2"/>
+  
+  <!-- Financial Graph Bars (light blue) - increasing height -->
+  <rect x="78" y="55" width="5" height="7" fill="#60a5fa" rx="0.5"/>
+  <rect x="85" y="53" width="5" height="9" fill="#60a5fa" rx="0.5"/>
+  <rect x="92" y="51" width="5" height="11" fill="#60a5fa" rx="0.5"/>
+  
+  <!-- Upward Trend Line (dark blue) with arrow -->
+  <path d="M 73 63 Q 80 60, 85 58 T 95 55 T 105 52" 
+        stroke="#1e3a8a" 
+        stroke-width="2.5" 
+        fill="none" 
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <!-- Arrow head pointing up-right -->
+  <path d="M 105 52 L 102 50 M 105 52 L 103 54" 
+        stroke="#1e3a8a" 
+        stroke-width="2.5" 
+        stroke-linecap="round"/>
+  
+  <!-- GlobalFinance Text -->
+  <text x="100" y="88" font-family="Arial, sans-serif" font-size="15" font-weight="600" text-anchor="middle">
+    <tspan fill="#1e3a8a">Global</tspan><tspan fill="#60a5fa">Finance</tspan>
+  </text>
+  
+  <!-- SLOGAN HERE Tagline -->
+  <text x="100" y="103" font-family="Arial, sans-serif" font-size="7" text-anchor="middle" fill="#60a5fa">
+    <tspan>• SLOGAN HERE •</tspan>
+  </text>
+</svg>

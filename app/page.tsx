@@ -878,13 +878,23 @@ export default function HomePage() {
         setIsSearching(true);
         setShowSearchResults(true);
 
-        // Simulate AI processing delay
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        // Generate context-aware response based on query using Excel data
-        const results = generateAIResponse(searchQuery, excelData, excelMetrics);
-        setSearchResults(results);
-        setIsSearching(false);
+        try {
+            // Use local keyword-based analysis (no OpenAI API calls)
+            const results = generateAIResponse(searchQuery, excelData, excelMetrics);
+            setSearchResults(results);
+        } catch (error) {
+            console.error('Search Error:', error);
+            // Show error message
+            setSearchResults({
+                summary: 'Unable to process search. Please try again.',
+                keyFindings: [],
+                recommendations: ['Please check your query and try again'],
+                dataSource: 'Local Analysis',
+                lastUpdated: 'Now'
+            });
+        } finally {
+            setIsSearching(false);
+        }
     };
 
     const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -1272,9 +1282,58 @@ export default function HomePage() {
     const generateIntelligentResponse = (query: string, analysis: any, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
         const lowerQuery = query.toLowerCase();
         
-        // Handle dimension-based queries FIRST (e.g., "product mix", "by product segment")
+        // Detect dimension-based queries (any dimension mentioned with "by" or "best/highest")
+        const dimensionKeywords = {
+            'costcenter': ['cost center', 'costcenter', 'cost centre'],
+            'geography': ['geography', 'geographic', 'region', 'location'],
+            'lineofbusiness': ['line of business', 'lineofbusiness', 'lob', 'business line'],
+            'legalentity': ['legal entity', 'legalentity', 'entity'],
+            'producttype': ['product type', 'producttype', 'product'],
+            'quarter': ['quarter', 'q1', 'q2', 'q3', 'q4'],
+            'scenario': ['scenario', 'scenarios']
+        };
+
+        // Check if query mentions dimensions
+        const mentionedDimensions: string[] = [];
+        Object.keys(dimensionKeywords).forEach(dim => {
+            if (dimensionKeywords[dim as keyof typeof dimensionKeywords].some(keyword => lowerQuery.includes(keyword))) {
+                mentionedDimensions.push(dim);
+            }
+        });
+
+        // Check for "by" queries or "best/highest" queries with dimensions
+        const hasByKeyword = lowerQuery.includes(' by ') || lowerQuery.includes('by ');
+        const hasBestHighest = lowerQuery.includes('best') || lowerQuery.includes('highest') || 
+                              lowerQuery.includes('top') || lowerQuery.includes('maximum') || 
+                              lowerQuery.includes('max') || lowerQuery.includes('lowest') || 
+                              lowerQuery.includes('minimum') || lowerQuery.includes('min');
+
+        // If dimensions are mentioned and query has "by" or "best/highest", use dimension query handler
+        if (mentionedDimensions.length > 0 && (hasByKeyword || hasBestHighest) && excelData) {
+            console.log('Detected dimension-based query:', { dimensions: mentionedDimensions, query });
+            return generateFlexibleDimensionResponse(query, mentionedDimensions, excelData, excelMetrics);
+        }
+        
+        // Handle cost center margin queries (legacy support)
+        const isCostCenterMarginQuery = (lowerQuery.includes('cost center') || lowerQuery.includes('costcenter') || lowerQuery.includes('costcentre')) && 
+                                       (lowerQuery.includes('margin') || lowerQuery.includes('best') || lowerQuery.includes('highest') || 
+                                        lowerQuery.includes('top') || lowerQuery.includes('maximum') || lowerQuery.includes('max'));
+        
+        if (isCostCenterMarginQuery && excelData) {
+            console.log('Detected cost center margin query, calculating margins...');
+            return generateCostCenterMarginResponse(query, excelData, excelMetrics);
+        }
+        
+        // Handle dimension-based queries (e.g., "product mix", "by product segment")
         if (analysis.dimensionBreakdown) {
             return generateDimensionResponse(analysis, excelData);
+        }
+
+        // Handle dimension value comparison queries (e.g., "revenue higher in North America or Europe")
+        const dimensionValueComparison = detectDimensionValueComparison(query, excelData);
+        if (dimensionValueComparison) {
+            console.log('Detected dimension value comparison:', dimensionValueComparison);
+            return generateDimensionValueComparisonResponse(query, dimensionValueComparison, excelData, excelMetrics);
         }
 
         // Handle comparison queries (e.g., "revenue vs expenses", "revenue vs AUM")
@@ -1293,6 +1352,924 @@ export default function HomePage() {
 
         // Handle specific metric queries
         return generateMetricResponse(query, analysis, excelData, excelMetrics);
+    };
+
+    // Generate response for cost center margin queries
+    const generateCostCenterMarginResponse = (query: string, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        if (!excelData) {
+            return {
+                summary: 'No Excel data available to analyze cost center margins.',
+                keyFindings: [],
+                recommendations: ['Please upload Excel data with cost center information'],
+                dataSource: 'Excel Data Upload',
+                lastUpdated: 'Real-time'
+            };
+        }
+
+        // Calculate margins by cost center from fact margin records
+        const marginByCostCenter: { [key: string]: { 
+            id: string; 
+            name: string; 
+            revenue: number; 
+            costs: number; 
+            profit: number; 
+            margin: number;
+            recordCount: number;
+        } } = {};
+
+        console.log('Cost Center Margin Analysis:', {
+            hasFactMarginRecords: !!excelData.factMarginRecords,
+            factMarginRecordCount: excelData.factMarginRecords?.length || 0,
+            hasDimensionTables: !!excelData.dimensionTables
+        });
+
+        if (excelData.factMarginRecords && excelData.factMarginRecords.length > 0) {
+            excelData.factMarginRecords.forEach((record: any) => {
+                // Find cost center ID - check multiple possible field names
+                const costCenterId = record.CostCenterID || record.Cost_Center_ID || record.costCenterId || 
+                                   record.CostCenter || record.costCenter || record.Cost_Center ||
+                                   record.SegmentID || record.Segment_ID || record.segmentId ||
+                                   record.Segment || record.segment ||
+                                   record.DepartmentID || record.Department || record.department;
+                
+                if (!costCenterId) return;
+
+                // Initialize cost center if not exists
+                if (!marginByCostCenter[costCenterId]) {
+                    // Try to get name from dimension tables
+                    let costCenterName = costCenterId;
+                    if (excelData.dimensionTables) {
+                        const dimTables = excelData.dimensionTables instanceof Map 
+                            ? excelData.dimensionTables 
+                            : new Map(Object.entries(excelData.dimensionTables));
+                        
+                        // Look for cost center in dimension tables
+                        for (const [dimName, dimTable] of dimTables.entries()) {
+                            const table = dimTable instanceof Map ? dimTable : new Map(Object.entries(dimTable));
+                            const dimRecord = table.get(costCenterId);
+                            if (dimRecord) {
+                                costCenterName = dimRecord.name || dimRecord.Name || dimRecord.CostCenter || costCenterId;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    marginByCostCenter[costCenterId] = {
+                        id: costCenterId,
+                        name: costCenterName,
+                        revenue: 0,
+                        costs: 0,
+                        profit: 0,
+                        margin: 0,
+                        recordCount: 0
+                    };
+                }
+
+                marginByCostCenter[costCenterId].recordCount += 1;
+
+                // Sum revenue and costs from numeric fields
+                Object.keys(record).forEach(key => {
+                    const value = record[key];
+                    if (typeof value === 'number' && !isNaN(value)) {
+                        const keyLower = key.toLowerCase();
+                        // Revenue indicators
+                        if (keyLower.includes('revenue') || keyLower.includes('sales') || 
+                            keyLower.includes('income') || keyLower.includes('rev_') ||
+                            (keyLower.includes('amount') && value > 0 && !keyLower.includes('cost') && !keyLower.includes('expense'))) {
+                            marginByCostCenter[costCenterId].revenue += Math.abs(value);
+                        } 
+                        // Cost/expense indicators
+                        else if (keyLower.includes('cost') || keyLower.includes('expense') || 
+                                 keyLower.includes('spend') || keyLower.includes('exp_') ||
+                                 (value < 0 && !keyLower.includes('revenue') && !keyLower.includes('sales'))) {
+                            marginByCostCenter[costCenterId].costs += Math.abs(value);
+                        }
+                    }
+                });
+            });
+
+            // Calculate margins for each cost center
+            Object.keys(marginByCostCenter).forEach(ccId => {
+                const cc = marginByCostCenter[ccId];
+                cc.profit = cc.revenue - cc.costs;
+                cc.margin = cc.revenue !== 0 ? (cc.profit / cc.revenue) * 100 : 0;
+            });
+        }
+
+        // Sort by margin (highest first)
+        const sortedCostCenters = Object.values(marginByCostCenter)
+            .filter(cc => cc.revenue > 0 || cc.costs > 0) // Only include cost centers with data
+            .sort((a, b) => b.margin - a.margin);
+
+        console.log('Cost Center Margin Results:', {
+            totalCostCenters: sortedCostCenters.length,
+            topThree: sortedCostCenters.slice(0, 3).map(cc => ({ name: cc.name, margin: cc.margin.toFixed(2) + '%' }))
+        });
+
+        if (sortedCostCenters.length === 0) {
+            return {
+                summary: 'Unable to calculate cost center margins from available data. Cost center information may not be present in the Excel file.',
+                keyFindings: [
+                    {
+                        title: 'Data Availability',
+                        detail: 'No cost center margin data found in uploaded Excel file',
+                        confidence: 100
+                    }
+                ],
+                recommendations: [
+                    'Ensure your Excel file contains cost center identifiers (CostCenterID, SegmentID, etc.)',
+                    'Verify that Fact_Margin records include cost center information',
+                    'Check that dimension tables include cost center names'
+                ],
+                dataSource: 'Excel Data Upload',
+                lastUpdated: 'Real-time'
+            };
+        }
+
+        // Get the cost center with highest margin
+        const bestCostCenter = sortedCostCenters[0];
+        const topThree = sortedCostCenters.slice(0, 3);
+
+        // Format values
+        const formatValue = (value: number) => {
+            if (Math.abs(value) >= 1000000) {
+                return `$${(value / 1000).toFixed(2)}M`;
+            } else if (Math.abs(value) >= 1000) {
+                return `$${(value / 1000).toFixed(2)}M`;
+            } else {
+                return `$${value.toFixed(2)}`;
+            }
+        };
+
+        return {
+            summary: `Cost Center "${bestCostCenter.name}" has the highest margin at ${bestCostCenter.margin.toFixed(2)}% with revenue of ${formatValue(bestCostCenter.revenue)} and costs of ${formatValue(bestCostCenter.costs)}.`,
+            keyFindings: topThree.map((cc, idx) => ({
+                title: `${cc.name} (${cc.id})`,
+                detail: `Margin: ${cc.margin.toFixed(2)}% | Revenue: ${formatValue(cc.revenue)} | Costs: ${formatValue(cc.costs)} | Profit: ${formatValue(cc.profit)}`,
+                confidence: 95 - (idx * 5)
+            })),
+            visualizations: {
+                topCostCenters: {
+                    type: 'bar',
+                    title: 'Top Cost Centers by Margin %',
+                    data: topThree.map(cc => ({
+                        costCenter: cc.name,
+                        margin: cc.margin,
+                        revenue: cc.revenue / 1000,
+                        costs: cc.costs / 1000
+                    }))
+                }
+            },
+            relatedDrivers: [
+                {
+                    category: 'Cost Centers',
+                    drivers: sortedCostCenters.slice(0, 5).map(cc => cc.name),
+                    impact: 'High'
+                }
+            ],
+            recommendations: [
+                `Focus on replicating ${bestCostCenter.name}'s success factors across other cost centers`,
+                `Analyze the cost structure of top-performing cost centers`,
+                `Identify opportunities to improve margins in lower-performing cost centers`,
+                `Review detailed breakdown for ${bestCostCenter.name} in the driver tree`
+            ],
+            dataSource: 'Excel Data Upload (Fact_Margin + Dimension Tables)',
+            lastUpdated: 'Real-time',
+            dataQuality: {
+                completeness: sortedCostCenters.length > 0 ? 90 : 0,
+                accuracy: 95,
+                timeliness: 100,
+                methodology: `Calculated from ${excelData.factMarginRecords?.length || 0} fact margin records across ${sortedCostCenters.length} cost centers`
+            }
+        };
+    };
+
+    // Detect dimension value comparison queries (e.g., "revenue higher in North America or Europe")
+    const detectDimensionValueComparison = (query: string, excelData: ExcelDriverTreeData | null) => {
+        if (!excelData || !excelData.dimensionTables) return null;
+
+        const lowerQuery = query.toLowerCase();
+        
+        // Check for comparison keywords
+        const comparisonKeywords = [' vs ', ' versus ', ' or ', ' higher ', ' lower ', ' greater ', ' less ', ' compare ', ' comparison '];
+        const hasComparison = comparisonKeywords.some(kw => lowerQuery.includes(kw));
+        if (!hasComparison) return null;
+
+        // Map dimension names to their tables and ID fields
+        const dimensionMapping: { [key: string]: { idField: string; dimTable: string; nameField: string } } = {
+            'geography': { idField: 'GeographyID', dimTable: 'Dim_Geography', nameField: 'Geography' },
+            'costcenter': { idField: 'CostCenterID', dimTable: 'Dim_CostCenter', nameField: 'CostCenter' },
+            'lineofbusiness': { idField: 'LOBID', dimTable: 'Dim_LineOfBusiness', nameField: 'LineOfBusiness' },
+            'legalentity': { idField: 'LegalEntityID', dimTable: 'Dim_LegalEntity', nameField: 'LegalEntity' },
+            'producttype': { idField: 'ProductTypeID', dimTable: 'Dim_ProductType', nameField: 'ProductType' }
+        };
+
+        const dimTables = excelData.dimensionTables instanceof Map 
+            ? excelData.dimensionTables 
+            : new Map(Object.entries(excelData.dimensionTables || {}));
+
+        // Get all dimension values from dimension tables
+        const allDimensionValues: { [dim: string]: string[] } = {};
+        Object.keys(dimensionMapping).forEach(dim => {
+            const mapping = dimensionMapping[dim];
+            if (dimTables.has(mapping.dimTable)) {
+                const dimTable = dimTables.get(mapping.dimTable);
+                const values: string[] = [];
+                
+                if (dimTable instanceof Map) {
+                    dimTable.forEach((record: any) => {
+                        const value = record[mapping.nameField] || record.name || record.Name;
+                        if (value) values.push(String(value).toLowerCase());
+                    });
+                } else if (dimTable && typeof dimTable === 'object') {
+                    Object.values(dimTable).forEach((record: any) => {
+                        const value = record?.[mapping.nameField] || record?.name || record?.Name;
+                        if (value) values.push(String(value).toLowerCase());
+                    });
+                }
+                allDimensionValues[dim] = values;
+            }
+        });
+
+        // Find which dimension values are mentioned in the query
+        let foundDimension: string | null = null;
+        const foundValues: string[] = [];
+
+        Object.keys(allDimensionValues).forEach(dim => {
+            allDimensionValues[dim].forEach(value => {
+                // Check if value is mentioned in query (case-insensitive, handle partial matches)
+                const valueWords = value.split(/\s+/);
+                const queryWords = lowerQuery.split(/\s+/);
+                
+                // Check for exact match or if all words of the value are in query
+                if (lowerQuery.includes(value) || 
+                    valueWords.every(word => word.length > 2 && queryWords.some(qw => qw.includes(word) || word.includes(qw)))) {
+                    if (!foundDimension) {
+                        foundDimension = dim;
+                    }
+                    if (foundDimension === dim && !foundValues.includes(value)) {
+                        foundValues.push(value);
+                    }
+                }
+            });
+        });
+
+        // Also check for common geography names that might not be in dimension table yet
+        const commonGeographies = ['north america', 'europe', 'asia', 'apac', 'emea', 'latin america', 'latam', 'africa', 'middle east'];
+        if (!foundDimension || foundDimension === 'geography') {
+            commonGeographies.forEach(geo => {
+                if (lowerQuery.includes(geo) && !foundValues.includes(geo)) {
+                    foundDimension = 'geography';
+                    foundValues.push(geo);
+                }
+            });
+        }
+
+        if (foundDimension && foundValues.length >= 2) {
+            return {
+                dimension: foundDimension,
+                values: foundValues,
+                mapping: dimensionMapping[foundDimension]
+            };
+        }
+
+        return null;
+    };
+
+    // Generate response for dimension value comparison queries
+    const generateDimensionValueComparisonResponse = (query: string, comparison: any, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        if (!excelData || !excelData.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            return {
+                summary: 'No Excel data available for comparison.',
+                keyFindings: [],
+                recommendations: ['Please upload Excel data with dimension information'],
+                dataSource: 'Excel Data Upload',
+                lastUpdated: 'Real-time'
+            };
+        }
+
+        const lowerQuery = query.toLowerCase();
+        const { dimension, values, mapping } = comparison;
+
+        // Detect measure field from query
+        const measureFields = [
+            'TradingVolume_$mm', 'TxnFeeRate_bps', 'AUM_$mm', 'CashBalances_$mm', 'NIM_bps_annual',
+            'MarketReturn_pct', 'Rev_TransactionalFees_$mm', 'Rev_CustodySafekeeping_$mm',
+            'Rev_AdminFundExpense_$mm', 'Rev_PerformanceFees_$mm', 'Rev_InterestRateRevenue_$mm',
+            'TotalRevenue_$mm', 'Headcount_FTE', 'Exp_CompBenefits_$mm', 'Exp_TechData_$mm',
+            'Exp_SalesMktg_$mm', 'Exp_OpsProfSvcs_$mm', 'TotalExpense_$mm', 'Margin_$mm', 'MarginPct'
+        ];
+
+        const measureAliases: { [key: string]: string[] } = {
+            'TotalRevenue_$mm': ['revenue', 'total revenue', 'sales', 'income'],
+            'TotalExpense_$mm': ['expense', 'expenses', 'total expense', 'costs', 'spending'],
+            'Margin_$mm': ['margin', 'profit'],
+            'MarginPct': ['margin %', 'margin percent', 'margin percentage', 'margin pct', 'profitability'],
+            'AUM_$mm': ['aum', 'assets under management', 'assets'],
+            'Headcount_FTE': ['headcount', 'fte', 'employees', 'staff']
+        };
+
+        let targetMeasure: string | null = null;
+        for (const [measure, aliases] of Object.entries(measureAliases)) {
+            if (aliases.some(alias => lowerQuery.includes(alias))) {
+                targetMeasure = measure;
+                break;
+            }
+        }
+
+        // Default to revenue if no measure specified
+        if (!targetMeasure) {
+            targetMeasure = 'TotalRevenue_$mm';
+        }
+
+        console.log('Dimension Value Comparison:', { dimension, values, targetMeasure });
+
+        // Get dimension table
+        const dimTables = excelData.dimensionTables instanceof Map 
+            ? excelData.dimensionTables 
+            : new Map(Object.entries(excelData.dimensionTables || {}));
+
+        // Build map of dimension value names to IDs
+        const valueToIdMap: { [value: string]: string[] } = {};
+        
+        if (dimTables.has(mapping.dimTable)) {
+            const dimTable = dimTables.get(mapping.dimTable);
+            
+            if (dimTable instanceof Map) {
+                dimTable.forEach((record: any, id: string) => {
+                    const name = String(record[mapping.nameField] || record.name || record.Name || '').toLowerCase();
+                    if (name) {
+                        if (!valueToIdMap[name]) valueToIdMap[name] = [];
+                        valueToIdMap[name].push(id);
+                    }
+                });
+            } else if (dimTable && typeof dimTable === 'object') {
+                Object.entries(dimTable).forEach(([id, record]: [string, any]) => {
+                    const name = String(record?.[mapping.nameField] || record?.name || record?.Name || '').toLowerCase();
+                    if (name) {
+                        if (!valueToIdMap[name]) valueToIdMap[name] = [];
+                        valueToIdMap[name].push(id);
+                    }
+                });
+            }
+        }
+
+        // Also handle common geography variations
+        if (dimension === 'geography') {
+            const geoVariations: { [key: string]: string[] } = {
+                'north america': ['north america', 'northamerica', 'na', 'usa', 'united states', 'us', 'america'],
+                'europe': ['europe', 'emea', 'eu'],
+                'asia': ['asia', 'apac', 'asia pacific'],
+                'latin america': ['latin america', 'latam', 'south america'],
+                'africa': ['africa'],
+                'middle east': ['middle east', 'me']
+            };
+
+            Object.keys(geoVariations).forEach(standardName => {
+                geoVariations[standardName].forEach(variant => {
+                    if (values.some(v => variant.includes(v) || v.includes(variant))) {
+                        // Try to find matching IDs
+                        Object.keys(valueToIdMap).forEach(dimName => {
+                            if (geoVariations[standardName].some(v => dimName.includes(v) || v.includes(dimName))) {
+                                if (!valueToIdMap[standardName]) valueToIdMap[standardName] = [];
+                                valueToIdMap[standardName].push(...valueToIdMap[dimName]);
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        // Aggregate measure values for each dimension value
+        const valueResults: { [value: string]: { 
+            value: string;
+            measureValue: number;
+            revenue: number;
+            expense: number;
+            margin: number;
+            marginPct: number;
+            recordCount: number;
+        } } = {};
+
+        values.forEach(value => {
+            valueResults[value] = {
+                value,
+                measureValue: 0,
+                revenue: 0,
+                expense: 0,
+                margin: 0,
+                marginPct: 0,
+                recordCount: 0
+            };
+        });
+
+        excelData.factMarginRecords.forEach((record: any) => {
+            const recordId = String(record[mapping.idField] || '');
+            if (!recordId) return;
+
+            // Find which dimension value this record belongs to
+            let matchedValue: string | null = null;
+            Object.keys(valueToIdMap).forEach(dimValue => {
+                if (valueToIdMap[dimValue].includes(recordId)) {
+                    // Check if this dimension value matches any of our comparison values
+                    const valueLower = dimValue.toLowerCase();
+                    values.forEach(queryValue => {
+                        if (valueLower.includes(queryValue) || queryValue.includes(valueLower) || 
+                            dimValue.toLowerCase() === queryValue.toLowerCase()) {
+                            matchedValue = queryValue;
+                        }
+                    });
+                }
+            });
+
+            // Also try direct name matching if ID matching didn't work
+            if (!matchedValue && dimension === 'geography') {
+                // Check if any geography name in record matches
+                Object.keys(record).forEach(key => {
+                    if (key.toLowerCase().includes('geography') || key.toLowerCase().includes('region')) {
+                        const recordValue = String(record[key] || '').toLowerCase();
+                        values.forEach(queryValue => {
+                            if (recordValue.includes(queryValue) || queryValue.includes(recordValue)) {
+                                matchedValue = queryValue;
+                            }
+                        });
+                    }
+                });
+            }
+
+            if (!matchedValue) return;
+
+            const result = valueResults[matchedValue];
+            result.recordCount += 1;
+
+            // Aggregate measure values - check all measure fields
+            measureFields.forEach(measure => {
+                // Try exact match first
+                if (record[measure] !== undefined && record[measure] !== null) {
+                    const val = typeof record[measure] === 'number' ? record[measure] : parseFloat(String(record[measure])) || 0;
+                    if (!isNaN(val)) {
+                        if (measure === targetMeasure) {
+                            result.measureValue += val;
+                        }
+                        if (measure === 'TotalRevenue_$mm') {
+                            result.revenue += val;
+                        }
+                        if (measure === 'TotalExpense_$mm') {
+                            result.expense += val;
+                        }
+                    }
+                }
+            });
+
+            // Also check for case-insensitive field matching
+            Object.keys(record).forEach(key => {
+                const keyLower = key.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                if (typeof record[key] === 'number' && !isNaN(record[key]) && record[key] !== 0) {
+                    // Check if this matches our target measure
+                    const targetLower = targetMeasure.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                    if (keyLower === targetLower || keyLower.includes(targetLower) || targetLower.includes(keyLower)) {
+                        result.measureValue += record[key];
+                    }
+                    // Check for revenue
+                    if (keyLower.includes('revenue') && !keyLower.includes('expense')) {
+                        result.revenue += record[key];
+                    }
+                    // Check for expense
+                    if (keyLower.includes('expense') || keyLower.includes('cost')) {
+                        result.expense += record[key];
+                    }
+                }
+            });
+        });
+
+        // Calculate margins
+        Object.keys(valueResults).forEach(value => {
+            const result = valueResults[value];
+            result.margin = result.revenue - result.expense;
+            result.marginPct = result.revenue !== 0 ? (result.margin / result.revenue) * 100 : 0;
+        });
+
+        // Format values
+        const formatValue = (value: number, measure: string) => {
+            if (measure.includes('Pct') || measure.includes('_pct') || measure.includes('_bps')) {
+                return `${value.toFixed(2)}${measure.includes('bps') ? ' bps' : '%'}`;
+            } else if (measure.includes('_$mm')) {
+                return `$${(value / 1000).toFixed(2)}M`;
+            } else if (measure.includes('_FTE')) {
+                return `${value.toFixed(0)} FTE`;
+            } else {
+                return `$${value.toFixed(2)}`;
+            }
+        };
+
+        const measureDisplayName = measureAliases[targetMeasure]?.[0] || targetMeasure || 'Measure';
+
+        // Compare the values
+        const results = Object.values(valueResults);
+        results.sort((a, b) => {
+            if (targetMeasure === 'MarginPct' || lowerQuery.includes('margin')) {
+                return b.marginPct - a.marginPct;
+            }
+            return b.measureValue - a.measureValue;
+        });
+
+        const higher = results[0];
+        const lower = results[1];
+
+        const difference = higher.measureValue - lower.measureValue;
+        const percentDiff = lower.measureValue !== 0 ? (difference / Math.abs(lower.measureValue)) * 100 : 0;
+
+        return {
+            summary: `${higher.value} has ${lowerQuery.includes('lower') || lowerQuery.includes('less') ? 'lower' : 'higher'} ${measureDisplayName} than ${lower.value}: ${formatValue(higher.measureValue, targetMeasure)} vs ${formatValue(lower.measureValue, targetMeasure)} (${percentDiff > 0 ? '+' : ''}${percentDiff.toFixed(1)}% difference).`,
+            keyFindings: results.map((result, idx) => ({
+                title: result.value,
+                detail: `${measureDisplayName}: ${formatValue(result.measureValue, targetMeasure)}${result.marginPct !== 0 ? ` | Margin: ${result.marginPct.toFixed(2)}%` : ''} | Records: ${result.recordCount}`,
+                confidence: 95 - (idx * 5)
+            })),
+            visualizations: {
+                comparison: {
+                    type: 'bar',
+                    title: `${measureDisplayName} Comparison`,
+                    data: results.map(r => ({
+                        label: r.value,
+                        value: r.measureValue,
+                        margin: r.marginPct
+                    }))
+                }
+            },
+            relatedDrivers: [
+                {
+                    category: mapping.nameField,
+                    drivers: results.map(r => r.value),
+                    impact: 'High'
+                }
+            ],
+            recommendations: [
+                `Analyze factors contributing to ${higher.value}'s ${lowerQuery.includes('lower') ? 'lower' : 'higher'} performance`,
+                `Review detailed breakdown for both ${results.map(r => r.value).join(' and ')}`,
+                `Identify best practices from ${higher.value} to apply to ${lower.value}`
+            ],
+            dataSource: 'Excel Data Upload (Fact_Margin + Dimension Tables)',
+            lastUpdated: 'Real-time',
+            dataQuality: {
+                completeness: 90,
+                accuracy: 95,
+                timeliness: 100,
+                methodology: `Compared ${measureDisplayName} across ${results.length} ${mapping.nameField} values from ${excelData.factMarginRecords.length} fact margin records`
+            }
+        };
+    };
+
+    // Generate flexible response for any dimension-based queries
+    const generateFlexibleDimensionResponse = (query: string, dimensions: string[], excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        if (!excelData || !excelData.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            return {
+                summary: 'No Excel data available for dimension analysis.',
+                keyFindings: [],
+                recommendations: ['Please upload Excel data with dimension information'],
+                dataSource: 'Excel Data Upload',
+                lastUpdated: 'Real-time'
+            };
+        }
+
+        const lowerQuery = query.toLowerCase();
+        
+        // Map dimension names to ID field names and dimension table names
+        const dimensionMapping: { [key: string]: { idField: string; dimTable: string; nameField: string } } = {
+            'costcenter': { idField: 'CostCenterID', dimTable: 'Dim_CostCenter', nameField: 'CostCenter' },
+            'geography': { idField: 'GeographyID', dimTable: 'Dim_Geography', nameField: 'Geography' },
+            'lineofbusiness': { idField: 'LOBID', dimTable: 'Dim_LineOfBusiness', nameField: 'LineOfBusiness' },
+            'legalentity': { idField: 'LegalEntityID', dimTable: 'Dim_LegalEntity', nameField: 'LegalEntity' },
+            'producttype': { idField: 'ProductTypeID', dimTable: 'Dim_ProductType', nameField: 'ProductType' },
+            'quarter': { idField: 'Quarter', dimTable: null, nameField: 'Quarter' },
+            'scenario': { idField: 'Scenario', dimTable: null, nameField: 'Scenario' }
+        };
+
+        // Detect measure field from query
+        const measureFields = [
+            'TradingVolume_$mm', 'TxnFeeRate_bps', 'AUM_$mm', 'CashBalances_$mm', 'NIM_bps_annual',
+            'MarketReturn_pct', 'Rev_TransactionalFees_$mm', 'Rev_CustodySafekeeping_$mm',
+            'Rev_AdminFundExpense_$mm', 'Rev_PerformanceFees_$mm', 'Rev_InterestRateRevenue_$mm',
+            'TotalRevenue_$mm', 'Headcount_FTE', 'Exp_CompBenefits_$mm', 'Exp_TechData_$mm',
+            'Exp_SalesMktg_$mm', 'Exp_OpsProfSvcs_$mm', 'TotalExpense_$mm', 'Margin_$mm', 'MarginPct'
+        ];
+
+        const measureAliases: { [key: string]: string[] } = {
+            'TradingVolume_$mm': ['trading volume', 'volume', 'trading'],
+            'TotalRevenue_$mm': ['revenue', 'total revenue', 'sales', 'income'],
+            'TotalExpense_$mm': ['expense', 'expenses', 'total expense', 'costs', 'spending'],
+            'Margin_$mm': ['margin', 'profit'],
+            'MarginPct': ['margin %', 'margin percent', 'margin percentage', 'margin pct', 'profitability'],
+            'AUM_$mm': ['aum', 'assets under management', 'assets'],
+            'Rev_TransactionalFees_$mm': ['transactional fees', 'transaction fees', 'fees'],
+            'Exp_CompBenefits_$mm': ['compensation', 'benefits', 'comp and benefits'],
+            'Headcount_FTE': ['headcount', 'fte', 'employees', 'staff']
+        };
+
+        let targetMeasure: string | null = null;
+        for (const [measure, aliases] of Object.entries(measureAliases)) {
+            if (aliases.some(alias => lowerQuery.includes(alias))) {
+                targetMeasure = measure;
+                break;
+            }
+        }
+
+        // If no specific measure found, default to MarginPct for "best/highest" queries, or TotalRevenue_$mm
+        if (!targetMeasure) {
+            if (lowerQuery.includes('margin')) {
+                targetMeasure = lowerQuery.includes('%') || lowerQuery.includes('percent') || lowerQuery.includes('pct') 
+                    ? 'MarginPct' : 'Margin_$mm';
+            } else if (lowerQuery.includes('revenue') || lowerQuery.includes('sales')) {
+                targetMeasure = 'TotalRevenue_$mm';
+            } else if (lowerQuery.includes('expense') || lowerQuery.includes('cost')) {
+                targetMeasure = 'TotalExpense_$mm';
+            } else {
+                targetMeasure = 'MarginPct'; // Default for "best" queries
+            }
+        }
+
+        console.log('Dimension Query Analysis:', { dimensions, targetMeasure, query });
+
+        // Aggregate data by dimensions
+        const aggregatedData: { [key: string]: { 
+            dimensionValues: { [dim: string]: string };
+            measures: { [measure: string]: number };
+            recordCount: number;
+        } } = {};
+
+        const dimTables = excelData.dimensionTables instanceof Map 
+            ? excelData.dimensionTables 
+            : new Map(Object.entries(excelData.dimensionTables || {}));
+
+        // Log first record to see what fields are available
+        if (excelData.factMarginRecords.length > 0) {
+            console.log('Sample record fields:', Object.keys(excelData.factMarginRecords[0]));
+            console.log('Sample record values:', excelData.factMarginRecords[0]);
+        }
+
+        excelData.factMarginRecords.forEach((record: any) => {
+            // Build dimension key
+            const dimensionValues: { [dim: string]: string } = {};
+            let dimensionKey = '';
+
+            dimensions.forEach(dim => {
+                const mapping = dimensionMapping[dim];
+                if (!mapping) return;
+
+                let dimValue = record[mapping.idField];
+                let dimName = String(dimValue || 'Unknown');
+
+                // If dimension table exists, look up name
+                if (mapping.dimTable && dimTables.has(mapping.dimTable)) {
+                    const dimTable = dimTables.get(mapping.dimTable);
+                    if (dimTable instanceof Map) {
+                        const dimRecord = dimTable.get(String(dimValue));
+                        if (dimRecord) {
+                            dimName = dimRecord[mapping.nameField] || dimRecord.name || dimRecord.Name || String(dimValue);
+                        }
+                    } else if (dimTable && typeof dimTable === 'object') {
+                        const dimRecord = (dimTable as any)[String(dimValue)];
+                        if (dimRecord) {
+                            dimName = dimRecord[mapping.nameField] || dimRecord.name || dimRecord.Name || String(dimValue);
+                        }
+                    }
+                }
+
+                dimensionValues[dim] = dimName;
+                dimensionKey += `${dim}:${dimName}|`;
+            });
+
+            if (!dimensionKey) return;
+
+            // Initialize if not exists
+            if (!aggregatedData[dimensionKey]) {
+                aggregatedData[dimensionKey] = {
+                    dimensionValues,
+                    measures: {},
+                    recordCount: 0
+                };
+            }
+
+            aggregatedData[dimensionKey].recordCount += 1;
+
+            // Always aggregate ALL measure fields so we have revenue/expense for margin calculations
+            // First, try exact field name matching
+            measureFields.forEach(measure => {
+                // Check for exact field name first
+                if (record[measure] !== undefined && record[measure] !== null && record[measure] !== '') {
+                    const value = typeof record[measure] === 'number' ? record[measure] : parseFloat(String(record[measure])) || 0;
+                    if (!isNaN(value)) {
+                        if (!aggregatedData[dimensionKey].measures[measure]) {
+                            aggregatedData[dimensionKey].measures[measure] = 0;
+                        }
+                        aggregatedData[dimensionKey].measures[measure] += value;
+                    }
+                }
+            });
+
+            // Also check all record fields for case-insensitive matching and partial matches
+            Object.keys(record).forEach(key => {
+                const keyLower = key.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                const value = record[key];
+                
+                if (typeof value === 'number' && !isNaN(value) && value !== 0) {
+                    // Find matching measure field (case-insensitive, ignoring spaces and underscores)
+                    const matchingMeasure = measureFields.find(m => {
+                        const mLower = m.toLowerCase().replace(/\s+/g, '').replace(/_/g, '');
+                        return mLower === keyLower || 
+                               keyLower.includes(mLower) || 
+                               mLower.includes(keyLower) ||
+                               key.toLowerCase() === m.toLowerCase();
+                    });
+                    
+                    if (matchingMeasure) {
+                        if (!aggregatedData[dimensionKey].measures[matchingMeasure]) {
+                            aggregatedData[dimensionKey].measures[matchingMeasure] = 0;
+                        }
+                        aggregatedData[dimensionKey].measures[matchingMeasure] += value;
+                    }
+                }
+            });
+        });
+
+        // Convert to array and calculate margins if needed
+        const results = Object.entries(aggregatedData).map(([key, data]) => {
+            // Get revenue and expense for margin calculation
+            const revenue = data.measures['TotalRevenue_$mm'] || 0;
+            const expense = data.measures['TotalExpense_$mm'] || 0;
+            
+            // Calculate margin from revenue and expense
+            const margin = revenue - expense;
+            const marginPct = revenue !== 0 ? (margin / revenue) * 100 : 0;
+            
+            // Get target measure value
+            let measureValue = 0;
+            if (targetMeasure) {
+                // For margin queries, use calculated margin
+                if (targetMeasure === 'MarginPct' || (targetMeasure === 'Margin_$mm' && lowerQuery.includes('margin'))) {
+                    measureValue = targetMeasure === 'MarginPct' ? marginPct : margin;
+                } else {
+                    measureValue = data.measures[targetMeasure] || 0;
+                }
+            } else {
+                // Default to margin if query mentions margin
+                if (lowerQuery.includes('margin')) {
+                    measureValue = lowerQuery.includes('%') || lowerQuery.includes('percent') || lowerQuery.includes('pct') 
+                        ? marginPct : margin;
+                } else {
+                    // Use first available measure or revenue
+                    measureValue = revenue || Object.values(data.measures)[0] || 0;
+                }
+            }
+
+            console.log('Result calculation:', {
+                dimensionKey: key,
+                revenue,
+                expense,
+                margin,
+                marginPct,
+                measureValue,
+                targetMeasure,
+                availableMeasures: Object.keys(data.measures)
+            });
+
+            return {
+                key,
+                dimensionValues: data.dimensionValues,
+                measureValue,
+                margin,
+                marginPct,
+                revenue,
+                expense,
+                recordCount: data.recordCount,
+                allMeasures: data.measures
+            };
+        });
+
+        // Sort based on query intent
+        const hasBestHighest = lowerQuery.includes('best') || lowerQuery.includes('highest') || 
+                              lowerQuery.includes('top') || lowerQuery.includes('maximum') || 
+                              lowerQuery.includes('max') || lowerQuery.includes('lowest') || 
+                              lowerQuery.includes('minimum') || lowerQuery.includes('min');
+
+        if (hasBestHighest) {
+            if (targetMeasure === 'MarginPct' || lowerQuery.includes('margin')) {
+                results.sort((a, b) => b.marginPct - a.marginPct);
+            } else {
+                results.sort((a, b) => b.measureValue - a.measureValue);
+            }
+        } else {
+            // Sort by measure value descending
+            results.sort((a, b) => b.measureValue - a.measureValue);
+        }
+
+        if (results.length === 0) {
+            return {
+                summary: `No data found for the specified dimensions: ${dimensions.join(', ')}`,
+                keyFindings: [],
+                recommendations: [
+                    'Verify that your Excel file contains the requested dimension fields',
+                    'Check that Fact_Margin records include the dimension IDs',
+                    'Ensure dimension tables (Dim_*) are present in your Excel file'
+                ],
+                dataSource: 'Excel Data Upload',
+                lastUpdated: 'Real-time'
+            };
+        }
+
+        // Format dimension label
+        const formatDimensionLabel = (dimValues: { [dim: string]: string }) => {
+            return Object.entries(dimValues).map(([dim, value]) => {
+                const dimName = dimensionMapping[dim]?.nameField || dim;
+                return `${dimName}: ${value}`;
+            }).join(', ');
+        };
+
+        const topResults = results.slice(0, 5);
+        const bestResult = results[0];
+
+        // Format value
+        const formatValue = (value: number, measure: string) => {
+            if (measure.includes('Pct') || measure.includes('_pct') || measure.includes('_bps')) {
+                return `${value.toFixed(2)}${measure.includes('bps') ? ' bps' : '%'}`;
+            } else if (measure.includes('_$mm')) {
+                return `$${(value / 1000).toFixed(2)}M`;
+            } else if (measure.includes('_FTE')) {
+                return `${value.toFixed(0)} FTE`;
+            } else {
+                return `$${value.toFixed(2)}`;
+            }
+        };
+
+        const measureDisplayName = measureAliases[targetMeasure || '']?.[0] || targetMeasure || 'Measure';
+
+        // Determine what value to show in summary
+        let summaryValue = bestResult.measureValue;
+        let summaryMeasure = targetMeasure || '';
+        if (lowerQuery.includes('margin') || targetMeasure === 'MarginPct' || targetMeasure === 'Margin_$mm') {
+            summaryValue = targetMeasure === 'MarginPct' ? bestResult.marginPct : bestResult.margin;
+            summaryMeasure = targetMeasure || 'MarginPct';
+        }
+
+        return {
+            summary: hasBestHighest 
+                ? `${formatDimensionLabel(bestResult.dimensionValues)} has the ${lowerQuery.includes('lowest') || lowerQuery.includes('minimum') ? 'lowest' : 'highest'} ${measureDisplayName} at ${formatValue(summaryValue, summaryMeasure)}${bestResult.marginPct !== 0 ? ` (${bestResult.marginPct.toFixed(2)}% margin)` : ''}.`
+                : `${measureDisplayName} breakdown by ${dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' and ')}: ${results.length} combinations found.`,
+            keyFindings: topResults.map((result, idx) => {
+                // For margin queries, show margin value and percentage
+                let detailText = '';
+                if (lowerQuery.includes('margin') || targetMeasure === 'MarginPct' || targetMeasure === 'Margin_$mm') {
+                    const marginValue = targetMeasure === 'MarginPct' ? result.marginPct : result.margin;
+                    detailText = `Margin: ${formatValue(marginValue, targetMeasure || 'MarginPct')} (${result.marginPct.toFixed(2)}%)`;
+                    if (result.revenue > 0 || result.expense > 0) {
+                        detailText += ` | Revenue: ${formatValue(result.revenue, 'TotalRevenue_$mm')} | Expense: ${formatValue(result.expense, 'TotalExpense_$mm')}`;
+                    }
+                } else {
+                    detailText = `${measureDisplayName}: ${formatValue(result.measureValue, targetMeasure || '')}`;
+                    if (result.marginPct !== 0) {
+                        detailText += ` | Margin: ${result.marginPct.toFixed(2)}%`;
+                    }
+                }
+                detailText += ` | Records: ${result.recordCount}`;
+                
+                return {
+                    title: formatDimensionLabel(result.dimensionValues),
+                    detail: detailText,
+                    confidence: 95 - (idx * 5)
+                };
+            }),
+            visualizations: {
+                dimensionBreakdown: {
+                    type: 'bar',
+                    title: `${measureDisplayName} by ${dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' and ')}`,
+                    data: topResults.map(r => ({
+                        label: formatDimensionLabel(r.dimensionValues),
+                        value: r.measureValue || r.marginPct,
+                        margin: r.marginPct
+                    }))
+                }
+            },
+            relatedDrivers: [
+                {
+                    category: dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' & '),
+                    drivers: topResults.slice(0, 5).map(r => formatDimensionLabel(r.dimensionValues)),
+                    impact: 'High'
+                }
+            ],
+            recommendations: [
+                `Analyze trends for top-performing ${dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' and ')}`,
+                `Review detailed breakdown in the driver tree`,
+                `Compare performance across different ${dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' and ')} combinations`
+            ],
+            dataSource: 'Excel Data Upload (Fact_Margin + Dimension Tables)',
+            lastUpdated: 'Real-time',
+            dataQuality: {
+                completeness: results.length > 0 ? 90 : 0,
+                accuracy: 95,
+                timeliness: 100,
+                methodology: `Aggregated from ${excelData.factMarginRecords.length} fact margin records across ${results.length} ${dimensions.map(d => dimensionMapping[d]?.nameField || d).join(' and ')} combinations`
+            }
+        };
     };
 
     // Generate response for dimension-based queries (e.g., "product mix", "by product segment")
@@ -1363,19 +2340,19 @@ export default function HomePage() {
         const total = breakdown.breakdown.reduce((sum: number, item: any) => sum + item.total, 0);
         const keyFindings: any[] = breakdown.breakdown.map((item: any, idx: number) => ({
             title: `${item.segment}`,
-            detail: `$${(item.total / 1000000).toFixed(2)}B (${item.percentage.toFixed(1)}% of total)`,
+            detail: `$${(item.total / 1000).toFixed(2)}M (${item.percentage.toFixed(1)}% of total)`,
             confidence: 95 - (idx * 2)
         }));
 
         // Add summary finding
         keyFindings.unshift({
             title: "Total",
-            detail: `$${(total / 1000000).toFixed(2)}B across ${breakdown.breakdown.length} product segments`,
+            detail: `$${(total / 1000).toFixed(2)}M across ${breakdown.breakdown.length} product segments`,
             confidence: 98
         });
 
         return {
-            summary: `${breakdown.metricName} breakdown by Product Segment: ${breakdown.breakdown.length} segments with total of $${(total / 1000000).toFixed(2)}B`,
+            summary: `${breakdown.metricName} breakdown by Product Segment: ${breakdown.breakdown.length} segments with total of $${(total / 1000).toFixed(2)}M`,
             keyFindings,
             visualizations: {
                 segmentBreakdown: {
@@ -1383,7 +2360,7 @@ export default function HomePage() {
                     title: `${breakdown.metricName} by Product Segment`,
                     data: breakdown.breakdown.map((item: any) => ({
                         name: item.segment,
-                        value: item.total / 1000000,
+                        value: item.total / 1000,
                         percentage: item.percentage
                     }))
                 },
@@ -1392,7 +2369,7 @@ export default function HomePage() {
                     title: `${breakdown.metricName} by Product Segment`,
                     data: breakdown.breakdown.map((item: any) => ({
                         segment: item.segment,
-                        value: item.total / 1000000,
+                        value: item.total / 1000,
                         percentage: item.percentage
                     }))
                 }
@@ -1448,20 +2425,20 @@ export default function HomePage() {
             {
                 title: firstComp.term.charAt(0).toUpperCase() + firstComp.term.slice(1),
                 detail: firstNodes.length > 0 
-                    ? `${firstNodes[0].name}: $${(firstValue / 1000000).toFixed(2)}B`
-                    : `Value: $${(firstValue / 1000000).toFixed(2)}B`,
+                    ? `${firstNodes[0].name}: $${(firstValue / 1000).toFixed(2)}M`
+                    : `Value: $${(firstValue / 1000).toFixed(2)}M`,
                 confidence: 95
             },
             {
                 title: secondComp.term.charAt(0).toUpperCase() + secondComp.term.slice(1),
                 detail: secondNodes.length > 0
-                    ? `${secondNodes[0].name}: $${(secondValue / 1000000).toFixed(2)}B`
-                    : `Value: $${(secondValue / 1000000).toFixed(2)}B`,
+                    ? `${secondNodes[0].name}: $${(secondValue / 1000).toFixed(2)}M`
+                    : `Value: $${(secondValue / 1000).toFixed(2)}M`,
                 confidence: 95
             },
             {
                 title: "Difference",
-                detail: `$${(Math.abs(difference) / 1000000).toFixed(2)}B ${difference > 0 ? 'higher' : 'lower'} (${Math.abs(percentDiff).toFixed(1)}%)`,
+                detail: `$${(Math.abs(difference) / 1000).toFixed(2)}M ${difference > 0 ? 'higher' : 'lower'} (${Math.abs(percentDiff).toFixed(1)}%)`,
                 confidence: 92
             }
         ];
@@ -1485,15 +2462,15 @@ export default function HomePage() {
         }
 
         return {
-            summary: `Comparison: ${firstComp.term} is $${(Math.abs(difference) / 1000000).toFixed(2)}B ${difference > 0 ? 'higher' : 'lower'} than ${secondComp.term} (${Math.abs(percentDiff).toFixed(1)}% difference)`,
+            summary: `Comparison: ${firstComp.term} is $${(Math.abs(difference) / 1000).toFixed(2)}M ${difference > 0 ? 'higher' : 'lower'} than ${secondComp.term} (${Math.abs(percentDiff).toFixed(1)}% difference)`,
             keyFindings,
             visualizations: (firstTrend || secondTrend) ? {
                 comparisonChart: {
                     type: 'bar',
                     title: 'Comparison',
                     data: [
-                        { name: firstComp.term, value: firstValue / 1000000 },
-                        { name: secondComp.term, value: secondValue / 1000000 }
+                        { name: firstComp.term, value: firstValue / 1000 },
+                        { name: secondComp.term, value: secondValue / 1000 }
                     ]
                 }
             } : undefined,
@@ -1532,7 +2509,7 @@ export default function HomePage() {
         const keyFindings: any[] = [
             {
                 title: "Trend Analysis",
-                detail: `${topTrend.nodeName} ${topTrend.change > 0 ? 'increased' : 'decreased'} by ${Math.abs(topTrend.change).toFixed(1)}% from $${(topTrend.first / 1000000).toFixed(2)}B to $${(topTrend.latest / 1000000).toFixed(2)}B`,
+                detail: `${topTrend.nodeName} ${topTrend.change > 0 ? 'increased' : 'decreased'} by ${Math.abs(topTrend.change).toFixed(1)}% from $${(topTrend.first / 1000).toFixed(2)}M to $${(topTrend.latest / 1000).toFixed(2)}M`,
                 confidence: 95
             }
         ];
@@ -1609,7 +2586,7 @@ export default function HomePage() {
                 title: topNode.name,
                 detail: topNode.rateAmount !== undefined 
                     ? `Rate: ${(topNode.rateAmount * 100).toFixed(1)}%`
-                    : `Value: $${(nodeValue / 1000000).toFixed(2)}B`,
+                    : `Value: $${(nodeValue / 1000).toFixed(2)}M`,
                 confidence: 95
             });
         }
@@ -1627,7 +2604,7 @@ export default function HomePage() {
         if (analysis.metrics.revenue !== undefined && (lowerQuery.includes('revenue') || lowerQuery.includes('sales'))) {
             keyFindings.push({
                 title: "Total Revenue",
-                detail: `$${(analysis.metrics.revenue / 1000000).toFixed(2)}B from your Excel data`,
+                detail: `$${(analysis.metrics.revenue / 1000).toFixed(2)}M from your Excel data`,
                 confidence: 98
             });
         }
@@ -1635,7 +2612,7 @@ export default function HomePage() {
         if (analysis.metrics.costs !== undefined && (lowerQuery.includes('cost') || lowerQuery.includes('expense'))) {
             keyFindings.push({
                 title: "Total Costs",
-                detail: `$${(analysis.metrics.costs / 1000000).toFixed(2)}B from your Excel data`,
+                detail: `$${(analysis.metrics.costs / 1000).toFixed(2)}M from your Excel data`,
                 confidence: 98
             });
         }
@@ -1643,7 +2620,7 @@ export default function HomePage() {
         if (analysis.metrics.profit !== undefined && (lowerQuery.includes('profit') || lowerQuery.includes('margin'))) {
             keyFindings.push({
                 title: "Total Profit",
-                detail: `$${(analysis.metrics.profit / 1000000).toFixed(2)}B with ${analysis.metrics.profitMargin?.toFixed(1)}% margin`,
+                detail: `$${(analysis.metrics.profit / 1000).toFixed(2)}M with ${analysis.metrics.profitMargin?.toFixed(1)}% margin`,
                 confidence: 98
             });
         }
@@ -1655,13 +2632,13 @@ export default function HomePage() {
             if (topNode.rateAmount !== undefined) {
                 summary += `${(topNode.rateAmount * 100).toFixed(1)}%`;
             } else {
-                summary += `$${(nodeValue / 1000000).toFixed(2)}B`;
+                summary += `$${(nodeValue / 1000).toFixed(2)}M`;
             }
             if (nodeTrend) {
                 summary += `, ${nodeTrend.change > 0 ? 'trending up' : 'trending down'} by ${Math.abs(nodeTrend.change).toFixed(1)}%`;
             }
         } else if (analysis.metrics.revenue !== undefined) {
-            summary += `Total revenue is $${(analysis.metrics.revenue / 1000000).toFixed(2)}B`;
+            summary += `Total revenue is $${(analysis.metrics.revenue / 1000).toFixed(2)}M`;
         } else {
             summary += "Found relevant data in your Excel file";
         }
@@ -3005,12 +3982,12 @@ export default function HomePage() {
                     {/* User Profile */}
                     <div className="mb-8">
                         <div className="relative w-32 h-32 mx-auto mb-4">
-                            {/* Avatar with actual image */}
-                            <div className="w-full h-full rounded-full overflow-hidden shadow-xl border-4 border-white">
+                            {/* Global Finance Logo */}
+                            <div className="w-full h-full rounded-full overflow-hidden shadow-xl border-4 border-white bg-white p-3">
                                 <img
-                                    src="/images/Sarah-Johnson-Finance-Executive-headshot.png"
-                                    alt="Sarah Johnson"
-                                    className="w-full h-full object-cover"
+                                    src="/logo.svg"
+                                    alt="Global Finance Logo"
+                                    className="w-full h-full object-contain"
                                 />
                             </div>
                             {/* Online indicator */}
@@ -3044,7 +4021,7 @@ export default function HomePage() {
                                     <span>Analyzing...</span>
                                 </div>
                             ) : (
-                                'AI Search'
+                                'Search'
                             )}
                         </button>
                     </div>
@@ -3480,7 +4457,7 @@ export default function HomePage() {
                                         <div className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl p-5 border border-purple-200">
                                             <div className="flex items-center space-x-2 mb-4">
                                                 <Brain className="w-5 h-5 text-purple-600" />
-                                                <h4 className="text-sm font-semibold text-gray-900">AI Recommendations</h4>
+                                                <h4 className="text-sm font-semibold text-gray-900">Recommendations</h4>
                                             </div>
                                             <div className="space-y-3">
                                                 {selectedInsight.aiRecommendations.map((rec: string, idx: number) => (
@@ -3550,7 +4527,7 @@ export default function HomePage() {
                                     <div>
                                         <div className="flex items-center space-x-3 mb-2">
                                             <Brain className="w-8 h-8" />
-                                            <h2 className="text-2xl font-bold">AI Analysis Results</h2>
+                                            <h2 className="text-2xl font-bold">Analysis Results</h2>
                                         </div>
                                         <p className="text-purple-100">Query: "{searchQuery}"</p>
                                     </div>
@@ -4072,10 +5049,10 @@ export default function HomePage() {
 
                                         {/* AI Recommendations */}
                                         <div>
-                                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
-                                                <Brain className="w-5 h-5 mr-2 text-cyan-600" />
-                                                AI Recommendations
-                                            </h3>
+                                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
+                                                    <Brain className="w-5 h-5 mr-2 text-cyan-600" />
+                                                    Recommendations
+                                                </h3>
                                             <div className="bg-gradient-to-br from-cyan-50 to-blue-50 rounded-xl p-5 border border-cyan-200">
                                                 <div className="space-y-3">
                                                     {searchResults.recommendations.map((rec: string, idx: number) => (

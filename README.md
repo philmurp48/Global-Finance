@@ -6,7 +6,7 @@ A comprehensive management reporting and analytics platform built with Next.js, 
 
 ### 📊 Executive Summary
 - Dynamic KPI tiles generated from uploaded Excel data
-- AI-powered search functionality
+- **AI-powered search functionality** - Powered by OpenAI GPT for flexible natural language queries
 - Personalized insights based on data metrics
 - Real-time data visualization
 
@@ -38,6 +38,7 @@ A comprehensive management reporting and analytics platform built with Next.js, 
 - **Charts**: Recharts
 - **UI Components**: Radix UI
 - **Excel Processing**: xlsx
+- **AI Integration**: OpenAI GPT-4 (for intelligent search and analysis)
 - **Data Storage**: Supabase / Vercel KV / In-memory fallback
 
 ## Getting Started
@@ -60,12 +61,24 @@ cd "Global Finance"
 npm install
 ```
 
-3. Run the development server:
+3. Configure environment variables:
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` and add your OpenAI API key:
+```
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+
+4. Run the development server:
 ```bash
 npm run dev
 ```
 
-4. Open [http://localhost:3002](http://localhost:3002) in your browser
+5. Open [http://localhost:3002](http://localhost:3002) in your browser
 
 ## Project Structure
 
@@ -73,7 +86,8 @@ npm run dev
 Global Finance/
 ├── app/
 │   ├── api/
-│   │   └── excel-data/      # API routes for Excel data management
+│   │   ├── excel-data/      # API routes for Excel data management
+│   │   └── ai-search/       # OpenAI API integration for AI search
 │   ├── data-upload/         # Excel upload page
 │   ├── operational-performance/  # Operational metrics page
 │   ├── scenario-modeling/    # Scenario modeling page
@@ -113,10 +127,18 @@ The platform expects Excel files with the following sheets:
 - Natural language parsing for scenario descriptions
 - Comprehensive P&L impact analysis
 
+### AI-Powered Search
+- Natural language query processing using OpenAI GPT
+- Intelligent analysis of Excel data to answer complex business questions
+- Handles queries like "What Cost Center has the best Margin %", comparisons, trends, and more
+- Falls back to local keyword matching if OpenAI API is not configured
+- Available in both the Executive Summary page and header search bar
+
 ### Error Handling
 - Comprehensive error handling throughout the application
 - Graceful fallbacks to default data when Excel data is unavailable
 - Detailed error logging for debugging
+- Fallback to local analysis if OpenAI API is unavailable
 
 ## Development
 

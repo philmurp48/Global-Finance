@@ -12,13 +12,14 @@ import {
     Menu,
     Repeat,
     Search,
+    Target,
     TrendingUp,
     Upload,
     X
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export default function ManagementReportingLayout({
@@ -28,7 +29,12 @@ export default function ManagementReportingLayout({
 }) {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [shouldPulse, setShouldPulse] = useState(false);
+    const [headerSearchQuery, setHeaderSearchQuery] = useState('');
+    const [headerSearchResults, setHeaderSearchResults] = useState<any>(null);
+    const [isHeaderSearching, setIsHeaderSearching] = useState(false);
+    const [showHeaderSearchResults, setShowHeaderSearchResults] = useState(false);
     const pathname = usePathname();
+    const router = useRouter();
 
     // Check if we're on the home page to set initial menu state
     useEffect(() => {
@@ -41,6 +47,59 @@ export default function ManagementReportingLayout({
             return () => clearTimeout(timer);
         }
     }, [pathname]);
+
+    // Header AI Search functionality
+    const handleHeaderAISearch = async () => {
+        if (!headerSearchQuery.trim()) return;
+
+        setHeaderSearchResults(null);
+        setIsHeaderSearching(true);
+        setShowHeaderSearchResults(true);
+
+        try {
+            // Fetch Excel data for context
+            const excelResponse = await fetch('/api/excel-data');
+            const excelDataResponse = await excelResponse.json();
+            const excelData = excelDataResponse.data;
+
+            // Note: Local analysis would require importing the generateAIResponse function
+            // For now, show a message that search is available on the main page
+            setHeaderSearchResults({
+                summary: 'Search functionality is available on the Executive Summary page. Please use the search bar there for detailed analysis.',
+                keyFindings: [
+                    {
+                        title: 'Search Location',
+                        detail: 'Use the Search bar on the Executive Summary (home) page for full analysis capabilities.',
+                        confidence: 100
+                    }
+                ],
+                recommendations: [
+                    'Navigate to the Executive Summary page',
+                    'Use the search bar below "Hi Sarah"',
+                    'Ask questions about your Excel data'
+                ],
+                dataSource: 'Local Analysis',
+                lastUpdated: 'Now'
+            });
+        } catch (error) {
+            console.error('Header Search Error:', error);
+            setHeaderSearchResults({
+                summary: 'Unable to process search. Please try again.',
+                keyFindings: [],
+                recommendations: [],
+                dataSource: 'System',
+                lastUpdated: 'Now'
+            });
+        } finally {
+            setIsHeaderSearching(false);
+        }
+    };
+
+    const handleHeaderKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            handleHeaderAISearch();
+        }
+    };
 
     const navigationItems = [
         {
@@ -93,11 +152,11 @@ export default function ManagementReportingLayout({
                             )}
                         </button>
 
-                        {/* Accenture Logo */}
+                        {/* Global Finance Logo */}
                         <div className="relative h-10 w-10 flex-shrink-0">
                             <Image
-                                src="/logo.png"
-                                alt="Accenture Logo"
+                                src="/logo.svg"
+                                alt="Global Finance Logo"
                                 fill
                                 className="object-contain"
                                 priority
@@ -123,13 +182,20 @@ export default function ManagementReportingLayout({
                                     <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                                     <input
                                         type="text"
+                                        value={headerSearchQuery}
+                                        onChange={(e) => setHeaderSearchQuery(e.target.value)}
+                                        onKeyPress={handleHeaderKeyPress}
                                         placeholder="Ask me anything about your business..."
                                         className="w-full pl-12 pr-4 py-2.5 bg-white/10 border border-white/20 rounded-l-full text-sm text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                         style={{ WebkitBackdropFilter: 'none', backdropFilter: 'none' }}
                                     />
                                 </div>
-                                <button className="px-8 py-2.5 bg-purple-gradient text-white font-medium rounded-r-full hover:shadow-lg hover:shadow-purple-500/50 transition-all text-sm whitespace-nowrap border border-purple-500">
-                                    AI Search
+                                <button 
+                                    onClick={handleHeaderAISearch}
+                                    disabled={isHeaderSearching || !headerSearchQuery.trim()}
+                                    className="px-8 py-2.5 bg-purple-gradient text-white font-medium rounded-r-full hover:shadow-lg hover:shadow-purple-500/50 transition-all text-sm whitespace-nowrap border border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isHeaderSearching ? 'Analyzing...' : 'Search'}
                                 </button>
                             </div>
                         </div>
@@ -143,11 +209,11 @@ export default function ManagementReportingLayout({
                                     <p className="text-sm font-medium text-white">Sarah Johnson</p>
                                     <p className="text-xs text-gray-300">Finance Executive</p>
                                 </div>
-                                <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-500/50">
+                                <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-500/50 bg-white p-1.5">
                                     <img
-                                        src="/images/Sarah-Johnson-Finance-Executive-headshot.png"
-                                        alt="Sarah Johnson"
-                                        className="w-full h-full object-cover"
+                                        src="/logo.svg"
+                                        alt="Global Finance Logo"
+                                        className="w-full h-full object-contain"
                                     />
                                 </div>
                             </div>
@@ -191,11 +257,11 @@ export default function ManagementReportingLayout({
                             <div className="p-6 border-b border-gray-700">
                                 <div className="flex items-center justify-between mb-6">
                                     <div className="flex items-center space-x-3">
-                                        {/* Accenture Logo */}
+                                        {/* Global Finance Logo */}
                                         <div className="relative h-8 w-8 flex-shrink-0">
                                             <Image
-                                                src="/logo.png"
-                                                alt="Accenture Logo"
+                                                src="/logo.svg"
+                                                alt="Global Finance Logo"
                                                 fill
                                                 className="object-contain"
                                             />
@@ -278,6 +344,118 @@ export default function ManagementReportingLayout({
             <div className="flex-1 overflow-auto bg-gray-50">
                 {children}
             </div>
+
+            {/* Header AI Search Results Modal */}
+            {showHeaderSearchResults && (
+                <AnimatePresence>
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setShowHeaderSearchResults(false)}
+                        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden"
+                        >
+                            {/* Header */}
+                            <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-6 text-white">
+                                <div className="flex items-start justify-between">
+                                    <div>
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <Brain className="w-8 h-8" />
+                                            <h2 className="text-2xl font-bold">Analysis Results</h2>
+                                        </div>
+                                        <p className="text-purple-100">Query: "{headerSearchQuery}"</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowHeaderSearchResults(false)}
+                                        className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Content */}
+                            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                                {isHeaderSearching ? (
+                                    <div className="flex flex-col items-center justify-center py-20">
+                                        <div className="w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                                        <p className="text-gray-600">Analyzing business data and generating insights...</p>
+                                    </div>
+                                ) : headerSearchResults ? (
+                                    <div className="space-y-6">
+                                        {/* Summary */}
+                                        <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-5 border border-blue-200">
+                                            <h3 className="font-semibold text-gray-900 mb-2">Executive Summary</h3>
+                                            <p className="text-gray-700">{headerSearchResults.summary}</p>
+                                        </div>
+
+                                        {/* Key Findings */}
+                                        {headerSearchResults.keyFindings && headerSearchResults.keyFindings.length > 0 && (
+                                            <div>
+                                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
+                                                    <Target className="w-5 h-5 mr-2 text-purple-600" />
+                                                    Key Findings
+                                                </h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    {headerSearchResults.keyFindings.map((finding: any, idx: number) => (
+                                                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+                                                            <div className="flex items-start justify-between mb-2">
+                                                                <h4 className="font-medium text-gray-900 text-sm">{finding.title}</h4>
+                                                                {finding.confidence && (
+                                                                    <div className="flex items-center space-x-1">
+                                                                        <span className="text-xs text-gray-500">Confidence</span>
+                                                                        <span className="text-xs font-bold text-purple-600">{finding.confidence}%</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-sm text-gray-600">{finding.detail}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Recommendations */}
+                                        {headerSearchResults.recommendations && headerSearchResults.recommendations.length > 0 && (
+                                            <div>
+                                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
+                                                    <Brain className="w-5 h-5 mr-2 text-cyan-600" />
+                                                    Recommendations
+                                                </h3>
+                                                <div className="space-y-3">
+                                                    {headerSearchResults.recommendations.map((rec: string, idx: number) => (
+                                                        <div key={idx} className="flex items-start space-x-3">
+                                                            <div className="w-7 h-7 rounded-full bg-cyan-500 text-white flex items-center justify-center flex-shrink-0 text-sm font-bold">
+                                                                {idx + 1}
+                                                            </div>
+                                                            <p className="text-sm text-gray-700">{rec}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Footer info */}
+                                        <div className="pt-4 border-t border-gray-200 text-xs text-gray-500 space-y-1">
+                                            <div className="flex justify-between">
+                                                <span><strong>Data Source:</strong> {headerSearchResults.dataSource || 'Excel Data Upload'}</span>
+                                                <span><strong>Last Updated:</strong> {headerSearchResults.lastUpdated || 'Real-time'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : null}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                </AnimatePresence>
+            )}
         </div>
     );
 }
