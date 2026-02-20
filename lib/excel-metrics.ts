@@ -117,30 +117,31 @@ export function extractScenarioLevers(excelData: ExcelDriverTreeData | null) {
     }
 
     try {
-        // Find Level 5 nodes (leaf nodes) that can be adjusted
-        const findLevel5Nodes = (nodes: DriverTreeNode[]): DriverTreeNode[] => {
+        // Find Level 4 nodes (leaf nodes in new structure) that can be adjusted
+        const findLevel4Nodes = (nodes: DriverTreeNode[]): DriverTreeNode[] => {
             const results: DriverTreeNode[] = [];
             if (!nodes || !Array.isArray(nodes)) {
                 return results;
             }
             nodes.forEach(node => {
                 if (!node) return;
-                if (node.level === 5 || (!node.children || node.children.length === 0)) {
+                // In new structure, Driver Level 4 is the leaf level that matches Fact_Margin amount types
+                if (node.level === 4 || (!node.children || node.children.length === 0)) {
                     if (node.accountingAmount !== undefined || node.rateAmount !== undefined) {
                         results.push(node);
                     }
                 }
                 if (node.children && Array.isArray(node.children)) {
-                    results.push(...findLevel5Nodes(node.children));
+                    results.push(...findLevel4Nodes(node.children));
                 }
             });
             return results;
         };
 
-        const level5Nodes = findLevel5Nodes(excelData.tree);
+        const level4Nodes = findLevel4Nodes(excelData.tree);
 
         // Convert to lever format
-        return level5Nodes.map(node => {
+        return level4Nodes.map(node => {
             const currentValue = node.accountingAmount || node.rateAmount || 0;
             const absValue = Math.abs(currentValue);
             return {

@@ -87,7 +87,7 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
                         Drag and drop or click to select
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
-                        Required sheets: Driver Tree, Accounting Fact, Rate Fact
+                        Required sheets: Fact_Margin, DriverTree, DIM_... (dimension tables)
                     </p>
                 </label>
             </div>

@@ -10,41 +10,47 @@ export interface DriverTreeNode {
     parentId?: string;
     accountingAmount?: number;
     rateAmount?: number;
-    rawAmount?: number; // Raw Amount from Fee Rate Fact (for calculation: Accounted Amount = Fee Rate × Raw Amount)
-    feeRate?: number; // Fee Rate from Fee Rate Fact
+    rawAmount?: number;
+    feeRate?: number;
     accountingPeriods?: PeriodData[];
     ratePeriods?: PeriodData[];
-    accountingTrend?: number; // Percentage change from first to last period
-    rateTrend?: number; // Percentage change from first to last period
-    isFeeRateDriver?: boolean; // True if this driver comes from Fee Rate Fact tab
+    accountingTrend?: number;
+    rateTrend?: number;
+    isFeeRateDriver?: boolean;
     children?: DriverTreeNode[];
 }
 
-export interface AccountingFactRecord {
-    driverId: string;
-    productId?: string;
-    period: string;
-    accountedAmount: number;
+// Fact_Margin record - main transaction records
+export interface FactMarginRecord {
+    [key: string]: any; // Dynamic fields including ID fields and amount type fields
+    // Common ID fields (will be detected dynamically)
+    // Amount type fields (will match Driver Level 4 fields)
 }
 
-export interface ProductDIMRecord {
-    productId: string;
-    productSegment: string;
+// Dimension table record - generic structure for DIM_... tables
+export interface DimensionRecord {
+    [key: string]: any; // All fields from dimension table
 }
+
+// Map of dimension table name to records keyed by ID
+export type DimensionTables = Map<string, Map<string, DimensionRecord>>;
 
 export interface ExcelDriverTreeData {
     tree: DriverTreeNode[];
-    accountingFacts: Map<string, PeriodData[]>;
-    rateFacts: Map<string, PeriodData[]> | Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }>;
-    accountingFactRecords?: AccountingFactRecord[]; // Full records with Product ID
-    productDIM?: Map<string, ProductDIMRecord>; // Map of Product ID to Product DIM record
+    factMarginRecords: FactMarginRecord[]; // All records from Fact_Margin tab
+    dimensionTables: DimensionTables; // Map of dimension table name -> Map of ID -> Record
+    // Maps for aggregating amounts by driver (from Driver Level 4)
+    accountingFacts: Map<string, PeriodData[]>; // Driver Level 4 name -> periods
+    accountingFactRecords?: FactMarginRecord[]; // Full records for detailed analysis
 }
 
 /**
- * Parse Excel file and extract Driver Tree structure with Accounting and Rate Facts
+ * Parse Excel file with new structure:
+ * - Fact_Margin: transaction records with ID fields and amount type fields
+ * - DIM_...: dimension tables joined by ID fields
+ * - DriverTree: Driver Level 1-4 hierarchy
  */
 export async function parseDriverTreeExcel(file: File): Promise<ExcelDriverTreeData> {
-    // Dynamically import xlsx - handle both default and named exports
     let XLSX: any;
     try {
         const xlsxModule = await import('xlsx');
@@ -71,51 +77,47 @@ export async function parseDriverTreeExcel(file: File): Promise<ExcelDriverTreeD
 
                 const workbook = XLSX.read(data, { type: 'binary' });
                 
-                // Parse Driver Tree tab
-                const driverTreeSheet = workbook.Sheets['Driver Tree'] || workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('driver')) || ''];
+                // Parse DriverTree tab
+                const driverTreeSheet = workbook.Sheets['DriverTree'] || 
+                                      workbook.Sheets['Driver Tree'] ||
+                                      workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('driver')) || ''];
                 if (!driverTreeSheet) {
-                    reject(new Error('Driver Tree sheet not found. Please ensure a sheet named "Driver Tree" exists.'));
+                    reject(new Error('DriverTree sheet not found. Please ensure a sheet named "DriverTree" exists.'));
                     return;
                 }
 
-                // Parse Accounting Fact tab
-                const accountingSheet = workbook.Sheets['Accounting Fact'] || workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('accounting')) || ''];
-                
-                // Parse Product DIM tab
-                const productDIMSheet = workbook.Sheets['Product DIM'] || workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('product dim') || name.toLowerCase().includes('product_dim')) || ''];
-                
-                // Parse Fee Rate Fact tab (preferred) or Rate Fact tab
-                const feeRateFactSheet = workbook.Sheets['Fee Rate Fact'] || workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('fee rate')) || ''];
-                const rateFactSheet = workbook.Sheets['Rate Fact'] || workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('rate fact') && !name.toLowerCase().includes('fee')) || ''];
-
-                // Extract driver tree structure
-                const tree = parseDriverTreeSheet(driverTreeSheet, XLSX);
-                
-                // Extract accounting facts - look for 'Accounted Amount' column specifically
-                const { accountingFacts, accountingFactRecords } = accountingSheet ? parseAccountingFactSheet(accountingSheet, XLSX) : { accountingFacts: new Map<string, PeriodData[]>(), accountingFactRecords: [] };
-                
-                // Extract Product DIM
-                const productDIM = productDIMSheet ? parseProductDIMSheet(productDIMSheet, XLSX) : new Map<string, ProductDIMRecord>();
-                
-                // Extract rate facts - try Fee Rate Fact first, then Rate Fact
-                let rateFacts: Map<string, PeriodData[]> | Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }>;
-                if (feeRateFactSheet) {
-                    rateFacts = parseFeeRateFactSheet(feeRateFactSheet, XLSX);
-                } else if (rateFactSheet) {
-                    rateFacts = parseFactSheet(rateFactSheet, XLSX);
-                } else {
-                    rateFacts = new Map<string, PeriodData[]>();
+                // Parse Fact_Margin tab
+                const factMarginSheet = workbook.Sheets['Fact_Margin'] || 
+                                       workbook.Sheets[workbook.SheetNames.find((name: string) => name.toLowerCase().includes('fact_margin') || name.toLowerCase().includes('fact margin')) || ''];
+                if (!factMarginSheet) {
+                    reject(new Error('Fact_Margin sheet not found. Please ensure a sheet named "Fact_Margin" exists.'));
+                    return;
                 }
 
+                // Parse all DIM_... tabs
+                const dimensionTables = parseDimensionTables(workbook, XLSX);
+
+                // Extract driver tree structure (Driver Level 1-4)
+                const tree = parseDriverTreeSheet(driverTreeSheet, XLSX);
+                
+                // Extract Fact_Margin records
+                const factMarginRecords = parseFactMarginSheet(factMarginSheet, XLSX);
+                
+                // Map Fact_Margin amounts to Driver Level 4 fields and aggregate
+                const { accountingFacts, accountingFactRecords } = mapFactMarginToDrivers(
+                    factMarginRecords, 
+                    tree
+                );
+
                 // Map amounts to tree nodes
-                mapAmountsToTree(tree, accountingFacts, rateFacts);
+                mapAmountsToTree(tree, accountingFacts);
 
                 resolve({
                     tree,
+                    factMarginRecords,
+                    dimensionTables,
                     accountingFacts,
-                    rateFacts,
-                    accountingFactRecords,
-                    productDIM
+                    accountingFactRecords: factMarginRecords
                 });
             } catch (error) {
                 reject(error);
@@ -128,9 +130,79 @@ export async function parseDriverTreeExcel(file: File): Promise<ExcelDriverTreeD
 }
 
 /**
- * Parse Driver Tree sheet to extract hierarchical structure
- * Expected format: columns for level indicators (Level 1, Level 2, Level 3, etc.)
- * or a single column with indentation/prefixes indicating hierarchy
+ * Parse all DIM_... sheets from workbook
+ */
+function parseDimensionTables(workbook: any, XLSX: any): DimensionTables {
+    const dimensionTables: DimensionTables = new Map();
+    
+    workbook.SheetNames.forEach((sheetName: string) => {
+        // Check if sheet name starts with "DIM_" or "Dim_"
+        if (sheetName.toUpperCase().startsWith('DIM_')) {
+            const sheet = workbook.Sheets[sheetName];
+            const dimMap = parseDimensionSheet(sheet, XLSX);
+            dimensionTables.set(sheetName, dimMap);
+        }
+    });
+    
+    return dimensionTables;
+}
+
+/**
+ * Parse a single dimension sheet (DIM_...)
+ * Returns Map of ID -> Record
+ */
+function parseDimensionSheet(sheet: any, XLSX: any): Map<string, DimensionRecord> {
+    const dimMap = new Map<string, DimensionRecord>();
+    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    if (!jsonData || jsonData.length === 0) {
+        return dimMap;
+    }
+
+    const headerRow = jsonData[0] as any[];
+    if (!headerRow || headerRow.length === 0) {
+        return dimMap;
+    }
+
+    // Find ID column (usually the first column or column with "ID" in name)
+    let idColumnIndex = -1;
+    headerRow.forEach((header, index) => {
+        const headerStr = String(header).toLowerCase().trim();
+        if (headerStr.includes('id') && idColumnIndex === -1) {
+            idColumnIndex = index;
+        }
+    });
+    
+    // Default to first column if no ID column found
+    if (idColumnIndex === -1) idColumnIndex = 0;
+
+    // Process data rows
+    for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
+        if (!row || row.length === 0) continue;
+
+        const id = row[idColumnIndex];
+        if (!id) continue;
+
+        const idStr = String(id).trim();
+        if (!idStr) continue;
+
+        // Create record object with all fields
+        const record: DimensionRecord = {};
+        headerRow.forEach((header, index) => {
+            const headerStr = String(header).trim();
+            const value = row[index];
+            record[headerStr] = value;
+        });
+
+        dimMap.set(idStr, record);
+    }
+
+    return dimMap;
+}
+
+/**
+ * Parse DriverTree sheet with Driver Level 1-4 columns
  */
 function parseDriverTreeSheet(sheet: any, XLSX: any): DriverTreeNode[] {
     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
@@ -139,40 +211,16 @@ function parseDriverTreeSheet(sheet: any, XLSX: any): DriverTreeNode[] {
         return [];
     }
 
-    // Try to detect the structure
     const firstRow = jsonData[0] as any[];
-    const hasLevelColumns = firstRow.some((cell: any) => 
-        typeof cell === 'string' && cell.toLowerCase().includes('level')
-    );
-
-    if (hasLevelColumns) {
-        return parseLevelColumns(jsonData);
-    } else {
-        // Try to parse as single column with hierarchy indicators
-        return parseHierarchicalColumn(jsonData);
-    }
-}
-
-/**
- * Parse when structure has explicit level columns (Level 1, Level 2, etc.)
- * Builds complete hierarchy by processing all levels in each row
- */
-function parseLevelColumns(data: any[][]): DriverTreeNode[] {
-    const tree: DriverTreeNode[] = [];
-    const nodeMap = new Map<string, DriverTreeNode>(); // Map by name+level for deduplication
-    let nodeIdCounter = 0;
-
-    // Find level columns and sort them
-    const headerRow = data[0] as any[];
+    
+    // Find Driver Level columns
     const levelColumns: { index: number; level: number }[] = [];
-    headerRow.forEach((header, index) => {
+    firstRow.forEach((header, index) => {
         if (typeof header === 'string') {
-            const levelMatch = header.toLowerCase().match(/level\s*(\d+)/);
+            const levelMatch = header.toLowerCase().match(/driver\s*level\s*(\d+)/i) || 
+                             header.toLowerCase().match(/level\s*(\d+)/i);
             if (levelMatch) {
                 levelColumns.push({ index, level: parseInt(levelMatch[1]) });
-            } else if (header.toLowerCase().includes('level')) {
-                // Fallback: assume order indicates level
-                levelColumns.push({ index, level: levelColumns.length + 1 });
             }
         }
     });
@@ -181,38 +229,40 @@ function parseLevelColumns(data: any[][]): DriverTreeNode[] {
     levelColumns.sort((a, b) => a.level - b.level);
 
     if (levelColumns.length === 0) {
-        // If no level columns found, assume first column is the hierarchy
-        return parseHierarchicalColumn(data);
+        // Fallback: try to detect structure
+        return parseHierarchicalColumn(jsonData);
     }
 
+    // Build tree from level columns
+    const tree: DriverTreeNode[] = [];
+    const nodeMap = new Map<string, DriverTreeNode>();
+    let nodeIdCounter = 0;
+
     // Process data rows (skip header)
-    for (let i = 1; i < data.length; i++) {
-        const row = data[i] as any[];
+    for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
         if (!row || row.every(cell => !cell)) continue;
 
         let parentNode: DriverTreeNode | null = null;
 
-        // Process each level from top to bottom to build the hierarchy
+        // Process each level from 1 to 4
         for (let colIdx = 0; colIdx < levelColumns.length; colIdx++) {
             const { index: colIndex, level } = levelColumns[colIdx];
             const cellValue = row[colIndex];
             
             if (!cellValue || !String(cellValue).trim()) {
-                // If this level is empty, skip remaining levels for this row
                 break;
             }
 
             const nodeName = String(cellValue).trim();
             if (!nodeName) continue;
 
-            // Create a unique key for this node (name + level + parent)
+            // Create unique key for this node
             const nodeKey = `${nodeName}|${level}|${parentNode?.id || 'root'}`;
             
-            // Check if we've already created this node
             let currentNode: DriverTreeNode | undefined = nodeMap.get(nodeKey);
             
             if (!currentNode) {
-                // Create new node
                 const nodeId = `node-${nodeIdCounter++}`;
                 currentNode = {
                     id: nodeId,
@@ -223,7 +273,6 @@ function parseLevelColumns(data: any[][]): DriverTreeNode[] {
                 };
                 nodeMap.set(nodeKey, currentNode);
 
-                // Add to tree or parent
                 if (parentNode) {
                     if (!parentNode.children) parentNode.children = [];
                     parentNode.children.push(currentNode);
@@ -240,7 +289,7 @@ function parseLevelColumns(data: any[][]): DriverTreeNode[] {
 }
 
 /**
- * Parse when structure is a single column with hierarchy indicated by indentation or prefixes
+ * Parse hierarchical column structure (fallback)
  */
 function parseHierarchicalColumn(data: any[][]): DriverTreeNode[] {
     const tree: DriverTreeNode[] = [];
@@ -248,7 +297,6 @@ function parseHierarchicalColumn(data: any[][]): DriverTreeNode[] {
     let nodeIdCounter = 0;
     const stack: DriverTreeNode[] = [];
 
-    // Process data rows
     for (let i = 0; i < data.length; i++) {
         const row = data[i] as any[];
         if (!row || row.length === 0) continue;
@@ -259,7 +307,6 @@ function parseHierarchicalColumn(data: any[][]): DriverTreeNode[] {
         const cellValue = String(firstCell).trim();
         if (!cellValue) continue;
 
-        // Detect level by indentation or prefix
         const indentMatch = cellValue.match(/^(\s*|-+|•+)/);
         const indentLevel = indentMatch ? Math.floor(indentMatch[1].length / 2) : 0;
         const cleanName = cellValue.replace(/^[\s\-•]+/, '').trim();
@@ -274,7 +321,6 @@ function parseHierarchicalColumn(data: any[][]): DriverTreeNode[] {
             children: []
         };
 
-        // Find parent based on level
         while (stack.length > 0 && stack[stack.length - 1].level >= node.level) {
             stack.pop();
         }
@@ -296,519 +342,164 @@ function parseHierarchicalColumn(data: any[][]): DriverTreeNode[] {
 }
 
 /**
- * Parse Accounting Fact sheet - handles both formats:
- * 1. Multiple period columns (old format)
- * 2. Single Period column + Accounted Amount column (new format)
- * Also captures Product ID if present
+ * Parse Fact_Margin sheet - transaction records with ID fields and amount type fields
  */
-function parseAccountingFactSheet(sheet: any, XLSX: any): { accountingFacts: Map<string, PeriodData[]>; accountingFactRecords: AccountingFactRecord[] } {
-    const facts = new Map<string, PeriodData[]>();
-    const records: AccountingFactRecord[] = [];
+function parseFactMarginSheet(sheet: any, XLSX: any): FactMarginRecord[] {
+    const records: FactMarginRecord[] = [];
     const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
     if (!jsonData || jsonData.length === 0) {
-        return { accountingFacts: facts, accountingFactRecords: records };
+        return records;
     }
 
     const headerRow = jsonData[0] as any[];
-    let idColumnIndex = -1;
-    let productIdColumnIndex = -1;
-    let periodColumnIndex = -1;
-    let accountedAmountColumnIndex = -1;
-
-    // Find identifier column (Driver ID)
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if ((headerStr.includes('id') || headerStr.includes('name') || headerStr.includes('driver') || headerStr.includes('node')) && !headerStr.includes('product')) {
-            if (idColumnIndex === -1) idColumnIndex = index;
-        }
-    });
-
-    // Find Product ID column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('product') && headerStr.includes('id')) {
-            if (productIdColumnIndex === -1) productIdColumnIndex = index;
-        }
-    });
-
-    // Check for new format: single Period column + Accounted Amount column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr === 'period' || headerStr.includes('period')) {
-            if (periodColumnIndex === -1) periodColumnIndex = index;
-        }
-        if (headerStr.includes('accounted amount') || (headerStr.includes('accounted') && headerStr.includes('amount'))) {
-            if (accountedAmountColumnIndex === -1) accountedAmountColumnIndex = index;
-        }
-    });
-
-    if (idColumnIndex === -1) idColumnIndex = 0;
-
-    // New format: Period column + Accounted Amount column
-    if (periodColumnIndex >= 0 && accountedAmountColumnIndex >= 0) {
-        // Group by driver ID and collect period/amount pairs
-        const driverData = new Map<string, PeriodData[]>();
-        
-        for (let i = 1; i < jsonData.length; i++) {
-            const row = jsonData[i] as any[];
-            if (!row || row.length === 0) continue;
-
-            const id = row[idColumnIndex];
-            const productId = productIdColumnIndex >= 0 ? row[productIdColumnIndex] : undefined;
-            const periodValue = row[periodColumnIndex];
-            const amountValue = row[accountedAmountColumnIndex];
-
-            if (!id || !periodValue || amountValue === undefined || amountValue === null || amountValue === '') continue;
-
-            const idStr = String(id).trim();
-            // Handle period value - if it's a number, it might be an Excel serial date
-            let periodStr: string;
-            if (typeof periodValue === 'number') {
-                // Check if it's a reasonable Excel serial date (1 to ~50000)
-                if (periodValue >= 1 && periodValue <= 100000) {
-                    // Convert Excel serial date to date string
-                    // Excel serial 1 = Jan 1, 1900
-                    // Excel incorrectly treats 1900 as a leap year (it wasn't)
-                    // Standard conversion: Excel epoch is Jan 1, 1900, but we use Dec 30, 1899
-                    // and add (serial - 1) days, then add 1 day to account for the leap year bug
-                    // Actually, the correct formula is: Dec 30, 1899 + serial days
-                    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
-                    const date = new Date(excelEpoch.getTime() + periodValue * 24 * 60 * 60 * 1000);
-                    if (!isNaN(date.getTime())) {
-                        // Format as YYYY-MM-DD
-                        const year = date.getFullYear();
-                        const month = String(date.getMonth() + 1).padStart(2, '0');
-                        const day = String(date.getDate()).padStart(2, '0');
-                        periodStr = `${year}-${month}-${day}`;
-                    } else {
-                        periodStr = String(periodValue).trim();
-                    }
-                } else {
-                    periodStr = String(periodValue).trim();
-                }
-            } else {
-                periodStr = String(periodValue).trim();
-            }
-            const productIdStr = productId ? String(productId).trim() : undefined;
-            
-            const amountNum = typeof amountValue === 'number' ? amountValue : parseFloat(String(amountValue).replace(/[^0-9.-]/g, ''));
-            if (isNaN(amountNum)) continue;
-
-            if (!driverData.has(idStr)) {
-                driverData.set(idStr, []);
-            }
-            
-            driverData.get(idStr)!.push({
-                value: amountNum,
-                period: periodStr
-            });
-
-            // Store full record with Product ID
-            records.push({
-                driverId: idStr,
-                productId: productIdStr,
-                period: periodStr,
-                accountedAmount: amountNum
-            });
-        }
-
-        // Convert to the expected format
-        driverData.forEach((periods, id) => {
-            if (periods.length > 0) {
-                facts.set(id, periods);
-            }
-        });
-
-        return { accountingFacts: facts, accountingFactRecords: records };
+    if (!headerRow || headerRow.length === 0) {
+        return records;
     }
 
-    // Old format: multiple period columns
-    const accountedAmountColumns: { index: number; period: string }[] = [];
-    
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('accounted amount') || (headerStr.includes('accounted') && headerStr.includes('amount'))) {
-            accountedAmountColumns.push({ index, period: String(header) });
-        }
-    });
-
-    if (accountedAmountColumns.length === 0) {
-        headerRow.forEach((header, index) => {
-            const headerStr = String(header).toLowerCase();
-            if (headerStr.includes('amount') || headerStr.includes('value') || headerStr.includes('$')) {
-                accountedAmountColumns.push({ index, period: String(header) });
-            }
-        });
-    }
-
-    if (accountedAmountColumns.length === 0) {
-        for (let i = 1; i < headerRow.length; i++) {
-            accountedAmountColumns.push({ index: i, period: String(headerRow[i]) || `Period ${i}` });
-        }
-    }
-
-    // Process data rows for old format
+    // Process data rows
     for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i] as any[];
         if (!row || row.length === 0) continue;
 
-        const id = row[idColumnIndex];
-        const productId = productIdColumnIndex >= 0 ? row[productIdColumnIndex] : undefined;
-        if (!id) continue;
+        // Create record object with all fields
+        const record: FactMarginRecord = {};
+        headerRow.forEach((header, index) => {
+            const headerStr = String(header).trim();
+            const value = row[index];
+            record[headerStr] = value;
+        });
 
-        const idStr = String(id).trim();
-        const productIdStr = productId ? String(productId).trim() : undefined;
-        if (!idStr) continue;
+        records.push(record);
+    }
 
+    return records;
+}
+
+/**
+ * Map Fact_Margin records to Driver Level 4 fields
+ * Amount type field names in Fact_Margin should match Driver Level 4 field names
+ */
+function mapFactMarginToDrivers(
+    factMarginRecords: FactMarginRecord[],
+    tree: DriverTreeNode[]
+): { accountingFacts: Map<string, PeriodData[]>; accountingFactRecords: FactMarginRecord[] } {
+    const accountingFacts = new Map<string, PeriodData[]>();
+    
+    // Extract Driver Level 4 field names from tree
+    const driverLevel4Names = extractDriverLevel4Names(tree);
+    
+    // Find period field in Fact_Margin (common names: Period, Date, TimePeriod, etc.)
+    let periodFieldName: string | null = null;
+    if (factMarginRecords.length > 0) {
+        const firstRecord = factMarginRecords[0];
+        periodFieldName = Object.keys(firstRecord).find(key => 
+            key.toLowerCase().includes('period') || 
+            key.toLowerCase().includes('date') ||
+            key.toLowerCase().includes('time')
+        ) || null;
+    }
+
+    // Group records by period if period field exists
+    const recordsByPeriod = new Map<string, FactMarginRecord[]>();
+    factMarginRecords.forEach(record => {
+        const period = periodFieldName ? String(record[periodFieldName] || '').trim() : 'All';
+        if (!recordsByPeriod.has(period)) {
+            recordsByPeriod.set(period, []);
+        }
+        recordsByPeriod.get(period)!.push(record);
+    });
+
+    // For each Driver Level 4 name, aggregate amounts from Fact_Margin
+    driverLevel4Names.forEach(driverName => {
         const periods: PeriodData[] = [];
         
-        accountedAmountColumns.forEach(({ index, period }) => {
-            const value = row[index];
-            if (value !== undefined && value !== null && value !== '') {
-                const valueNum = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
-                if (!isNaN(valueNum)) {
-                    periods.push({ value: valueNum, period });
-                    // Store full record with Product ID
-                    records.push({
-                        driverId: idStr,
-                        productId: productIdStr,
-                        period: period,
-                        accountedAmount: valueNum
-                    });
+        // For each period, sum the amounts for this driver
+        recordsByPeriod.forEach((records, period) => {
+            let totalAmount = 0;
+            
+            records.forEach(record => {
+                // Check if this record has a field matching the driver name
+                const amount = getAmountForDriver(record, driverName);
+                if (amount !== null && !isNaN(amount)) {
+                    totalAmount += amount;
                 }
-            }
-        });
-
-        if (periods.length > 0) {
-            facts.set(idStr, periods);
-        }
-    }
-
-    return { accountingFacts: facts, accountingFactRecords: records };
-}
-
-/**
- * Parse Product DIM sheet - extracts Product ID and Product Segment mapping
- * Expected format: Product ID column + Product Segment column
- */
-function parseProductDIMSheet(sheet: any, XLSX: any): Map<string, ProductDIMRecord> {
-    const productDIM = new Map<string, ProductDIMRecord>();
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-    if (!jsonData || jsonData.length === 0) {
-        return productDIM;
-    }
-
-    const headerRow = jsonData[0] as any[];
-    let productIdColumnIndex = -1;
-    let productSegmentColumnIndex = -1;
-
-    // Find Product ID column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('product') && headerStr.includes('id')) {
-            if (productIdColumnIndex === -1) productIdColumnIndex = index;
-        }
-    });
-
-    // Find Product Segment column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('product') && headerStr.includes('segment')) {
-            if (productSegmentColumnIndex === -1) productSegmentColumnIndex = index;
-        }
-    });
-
-    // If Product Segment not found, try alternative names
-    if (productSegmentColumnIndex === -1) {
-        headerRow.forEach((header, index) => {
-            const headerStr = String(header).toLowerCase().trim();
-            if (headerStr.includes('segment') && !headerStr.includes('product')) {
-                if (productSegmentColumnIndex === -1) productSegmentColumnIndex = index;
-            }
-        });
-    }
-
-    // Default to first column if Product ID not found, second column for Product Segment
-    if (productIdColumnIndex === -1) productIdColumnIndex = 0;
-    if (productSegmentColumnIndex === -1) productSegmentColumnIndex = 1;
-
-    // Process data rows
-    for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i] as any[];
-        if (!row || row.length === 0) continue;
-
-        const productId = row[productIdColumnIndex];
-        const productSegment = row[productSegmentColumnIndex];
-
-        if (!productId) continue;
-
-        const productIdStr = String(productId).trim();
-        const productSegmentStr = productSegment ? String(productSegment).trim() : '';
-
-        if (productIdStr) {
-            productDIM.set(productIdStr, {
-                productId: productIdStr,
-                productSegment: productSegmentStr
             });
-        }
-    }
-
-    return productDIM;
-}
-
-/**
- * Parse Fee Rate Fact sheet - captures Fee Rate, Raw Amount, and calculates Accounted Amount
- * Expected format: identifier + Fee Rate + Raw Amount columns
- * Returns map with fee rate, raw amount, and calculated accounted amount
- */
-function parseFeeRateFactSheet(sheet: any, XLSX: any): Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }> {
-    const facts = new Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }>();
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-    if (!jsonData || jsonData.length === 0) {
-        return facts;
-    }
-
-    const headerRow = jsonData[0] as any[];
-    let idColumnIndex = -1;
-    const feeRateColumns: { index: number; period: string }[] = [];
-    const rawAmountColumns: { index: number; period: string }[] = [];
-
-    // Find identifier column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('id') || headerStr.includes('name') || headerStr.includes('driver') || headerStr.includes('node')) {
-            if (idColumnIndex === -1) idColumnIndex = index;
-        }
-    });
-
-    // Find Fee Rate columns
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('fee rate') || (headerStr.includes('rate') && !headerStr.includes('raw'))) {
-            feeRateColumns.push({ index, period: String(header) });
-        }
-    });
-
-    // Find Raw Amount columns
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('raw amount') || (headerStr.includes('raw') && headerStr.includes('amount'))) {
-            rawAmountColumns.push({ index, period: String(header) });
-        }
-    });
-
-    if (idColumnIndex === -1) idColumnIndex = 0;
-
-    // Process data rows
-    for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i] as any[];
-        if (!row || row.length === 0) continue;
-
-        const id = row[idColumnIndex];
-        if (!id) continue;
-
-        const idStr = String(id).trim();
-        if (!idStr) continue;
-
-        const feeRates: PeriodData[] = [];
-        const rawAmounts: PeriodData[] = [];
-        const accountedAmounts: PeriodData[] = [];
-
-        // Extract Fee Rates
-        feeRateColumns.forEach(({ index, period }) => {
-            const value = row[index];
-            if (value !== undefined && value !== null && value !== '') {
-                const valueNum = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
-                if (!isNaN(valueNum)) {
-                    feeRates.push({ value: valueNum, period });
-                }
-            }
-        });
-
-        // Extract Raw Amounts
-        rawAmountColumns.forEach(({ index, period }) => {
-            const value = row[index];
-            if (value !== undefined && value !== null && value !== '') {
-                const valueNum = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
-                if (!isNaN(valueNum)) {
-                    rawAmounts.push({ value: valueNum, period });
-                }
-            }
-        });
-
-        // Calculate Accounted Amount = Fee Rate × Raw Amount for each period
-        // Match periods between fee rate and raw amount
-        feeRates.forEach((feeRate) => {
-            const matchingRawAmount = rawAmounts.find(ra => ra.period === feeRate.period) || rawAmounts[0];
-            if (matchingRawAmount) {
-                const accountedValue = feeRate.value * matchingRawAmount.value;
-                accountedAmounts.push({ 
-                    value: accountedValue, 
-                    period: feeRate.period 
+            
+            if (totalAmount !== 0 || periods.length === 0) {
+                periods.push({
+                    value: totalAmount,
+                    period: period !== 'All' ? period : undefined
                 });
             }
         });
 
-        if (feeRates.length > 0 || rawAmounts.length > 0) {
-            facts.set(idStr, { feeRate: feeRates, rawAmount: rawAmounts, accountedAmount: accountedAmounts });
-        }
-    }
-
-    return facts;
-}
-
-/**
- * Parse fact sheet (legacy - for Rate Fact if Fee Rate Fact not found)
- * Handles both formats:
- * 1. Multiple period columns (old format)
- * 2. Single Period column + value column (new format)
- */
-function parseFactSheet(sheet: any, XLSX: any): Map<string, PeriodData[]> {
-    const facts = new Map<string, PeriodData[]>();
-    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-    if (!jsonData || jsonData.length === 0) {
-        return facts;
-    }
-
-    const headerRow = jsonData[0] as any[];
-    let idColumnIndex = -1;
-    let periodColumnIndex = -1;
-    let valueColumnIndex = -1;
-
-    // Find identifier column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr.includes('id') || headerStr.includes('name') || headerStr.includes('driver') || headerStr.includes('node')) {
-            if (idColumnIndex === -1) idColumnIndex = index;
-        }
-    });
-
-    // Check for new format: single Period column + value column
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr === 'period' || (headerStr.includes('period') && !headerStr.includes('amount'))) {
-            if (periodColumnIndex === -1) periodColumnIndex = index;
-        }
-        // Look for rate, amount, or value column (but not period)
-        if (headerStr.includes('rate') || headerStr.includes('amount') || headerStr.includes('value')) {
-            if (valueColumnIndex === -1 && !headerStr.includes('period')) valueColumnIndex = index;
-        }
-    });
-
-    if (idColumnIndex === -1) idColumnIndex = 0;
-
-    // New format: Period column + value column
-    if (periodColumnIndex >= 0 && valueColumnIndex >= 0) {
-        // Group by driver ID and collect period/value pairs
-        const driverData = new Map<string, PeriodData[]>();
-        
-        for (let i = 1; i < jsonData.length; i++) {
-            const row = jsonData[i] as any[];
-            if (!row || row.length === 0) continue;
-
-            const id = row[idColumnIndex];
-            const periodValue = row[periodColumnIndex];
-            const value = row[valueColumnIndex];
-
-            if (!id || !periodValue || value === undefined || value === null || value === '') continue;
-
-            const idStr = String(id).trim();
-            const periodStr = String(periodValue).trim();
-            
-            const valueNum = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
-            if (isNaN(valueNum)) continue;
-
-            if (!driverData.has(idStr)) {
-                driverData.set(idStr, []);
-            }
-            
-            driverData.get(idStr)!.push({
-                value: valueNum,
-                period: periodStr
-            });
-        }
-
-        // Convert to the expected format
-        driverData.forEach((periods, id) => {
-            if (periods.length > 0) {
-                facts.set(id, periods);
-            }
-        });
-
-        return facts;
-    }
-
-    // Old format: multiple period columns
-    const periodColumns: { index: number; period: string }[] = [];
-
-    headerRow.forEach((header, index) => {
-        const headerStr = String(header).toLowerCase().trim();
-        if (headerStr && !headerStr.includes('level') && !headerStr.includes('id') && !headerStr.includes('name') && !headerStr.includes('driver') && !headerStr.includes('node')) {
-            periodColumns.push({ index, period: String(header) });
-        }
-    });
-
-    if (periodColumns.length === 0) {
-        headerRow.forEach((header, index) => {
-            const headerStr = String(header).toLowerCase();
-            if (headerStr.includes('amount') || headerStr.includes('value') || headerStr.includes('$') || headerStr.includes('total') || headerStr.includes('period')) {
-                periodColumns.push({ index, period: String(header) });
-            }
-        });
-    }
-
-    if (periodColumns.length === 0 && idColumnIndex >= 0) {
-        for (let i = idColumnIndex + 1; i < headerRow.length; i++) {
-            periodColumns.push({ index: i, period: String(headerRow[i]) || `Period ${i - idColumnIndex}` });
-        }
-    }
-
-    if (idColumnIndex === -1) idColumnIndex = 0;
-    if (periodColumns.length === 0) {
-        for (let i = 1; i < headerRow.length; i++) {
-            periodColumns.push({ index: i, period: String(headerRow[i]) || `Period ${i}` });
-        }
-    }
-
-    // Process data rows for old format
-    for (let i = 1; i < jsonData.length; i++) {
-        const row = jsonData[i] as any[];
-        if (!row || row.length === 0) continue;
-
-        const id = row[idColumnIndex];
-        if (!id) continue;
-
-        const idStr = String(id).trim();
-        if (!idStr) continue;
-
-        const periods: PeriodData[] = [];
-        
-        periodColumns.forEach(({ index, period }) => {
-            const value = row[index];
-            if (value !== undefined && value !== null && value !== '') {
-                const valueNum = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
-                if (!isNaN(valueNum)) {
-                    periods.push({ value: valueNum, period });
-                }
-            }
-        });
-
         if (periods.length > 0) {
-            facts.set(idStr, periods);
+            accountingFacts.set(driverName, periods);
         }
-    }
+    });
 
-    return facts;
+    return { accountingFacts, accountingFactRecords: factMarginRecords };
 }
 
 /**
- * Map accounting and rate amounts to tree nodes
- * Matches by node name (exact or partial) and aggregates upward
+ * Extract Driver Level 4 field names from tree
  */
+function extractDriverLevel4Names(tree: DriverTreeNode[]): string[] {
+    const level4Names: string[] = [];
+    
+    const traverse = (nodes: DriverTreeNode[]) => {
+        nodes.forEach(node => {
+            if (node.level === 4) {
+                level4Names.push(node.name);
+            }
+            if (node.children) {
+                traverse(node.children);
+            }
+        });
+    };
+    
+    traverse(tree);
+    return level4Names;
+}
+
+/**
+ * Get amount for a driver from a Fact_Margin record
+ * Checks if any field name matches the driver name (case-insensitive, partial match)
+ */
+function getAmountForDriver(record: FactMarginRecord, driverName: string): number | null {
+    const driverNameLower = driverName.toLowerCase().trim();
+    
+    // Try exact match first
+    for (const [key, value] of Object.entries(record)) {
+        const keyLower = key.toLowerCase().trim();
+        if (keyLower === driverNameLower) {
+            const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+            if (!isNaN(numValue)) {
+                return numValue;
+            }
+        }
+    }
+    
+    // Try partial match
+    for (const [key, value] of Object.entries(record)) {
+        const keyLower = key.toLowerCase().trim();
+        // Skip ID fields and period fields
+        if (keyLower.includes('id') || keyLower.includes('period') || keyLower.includes('date')) {
+            continue;
+        }
+        
+        if (keyLower.includes(driverNameLower) || driverNameLower.includes(keyLower)) {
+            const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+            if (!isNaN(numValue)) {
+                return numValue;
+            }
+        }
+    }
+    
+    return null;
+}
+
 /**
  * Parse period string to date for sorting
  */
@@ -817,15 +508,15 @@ function parsePeriodDate(period: string | undefined): Date | null {
     
     const periodStr = String(period).trim();
     
-    // Try quarterly formats first
-    const quarterlyMatch1 = periodStr.match(/Q(\d)\s+(\d{4})/i); // Q1 2024
+    // Try quarterly formats
+    const quarterlyMatch1 = periodStr.match(/Q(\d)\s+(\d{4})/i);
     if (quarterlyMatch1) {
         const quarter = parseInt(quarterlyMatch1[1]);
         const year = parseInt(quarterlyMatch1[2]);
         return new Date(year, (quarter - 1) * 3, 1);
     }
     
-    const quarterlyMatch2 = periodStr.match(/(\d{4})-Q(\d)/i); // 2024-Q1
+    const quarterlyMatch2 = periodStr.match(/(\d{4})-Q(\d)/i);
     if (quarterlyMatch2) {
         const year = parseInt(quarterlyMatch2[1]);
         const quarter = parseInt(quarterlyMatch2[2]);
@@ -833,14 +524,14 @@ function parsePeriodDate(period: string | undefined): Date | null {
     }
     
     // Try year-month formats
-    const yearMonthMatch1 = periodStr.match(/(\d{4})M(\d{2})/); // 2024M01
+    const yearMonthMatch1 = periodStr.match(/(\d{4})M(\d{2})/);
     if (yearMonthMatch1) {
         const year = parseInt(yearMonthMatch1[1]);
         const month = parseInt(yearMonthMatch1[2]) - 1;
         return new Date(year, month, 1);
     }
     
-    const yearMonthMatch2 = periodStr.match(/(\d{4})(\d{2})/); // 202401
+    const yearMonthMatch2 = periodStr.match(/(\d{4})(\d{2})/);
     if (yearMonthMatch2 && yearMonthMatch2[0].length === 6) {
         const year = parseInt(yearMonthMatch2[1]);
         const month = parseInt(yearMonthMatch2[2]) - 1;
@@ -849,13 +540,12 @@ function parsePeriodDate(period: string | undefined): Date | null {
         }
     }
     
-    // Try standard date formats - try parsing directly first
+    // Try standard date formats
     const directDate = new Date(periodStr);
     if (!isNaN(directDate.getTime())) {
         return directDate;
     }
     
-    // Try MM/DD/YYYY format explicitly
     const mmddyyyyMatch = periodStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
     if (mmddyyyyMatch) {
         const month = parseInt(mmddyyyyMatch[1]) - 1;
@@ -867,7 +557,6 @@ function parsePeriodDate(period: string | undefined): Date | null {
         }
     }
     
-    // Try YYYY-MM-DD format
     const yyyymmddMatch = periodStr.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (yyyymmddMatch) {
         const year = parseInt(yyyymmddMatch[1]);
@@ -879,12 +568,6 @@ function parsePeriodDate(period: string | undefined): Date | null {
         }
     }
     
-    // Try direct date parsing as last resort
-    const date = new Date(periodStr);
-    if (!isNaN(date.getTime())) {
-        return date;
-    }
-    
     return null;
 }
 
@@ -894,17 +577,14 @@ function parsePeriodDate(period: string | undefined): Date | null {
 function calculateTrend(periods: PeriodData[]): number | undefined {
     if (!periods || periods.length < 2) return undefined;
     
-    // Sort periods by date (min to max)
     const periodsWithDates = periods.map(p => ({
         ...p,
         date: parsePeriodDate(p.period)
     }));
     
-    // Filter out periods without valid dates
     const validPeriods = periodsWithDates.filter(p => p.date !== null);
     
     if (validPeriods.length < 2) {
-        // If we can't parse dates, fall back to first/last
         const firstValue = periods[0].value;
         const lastValue = periods[periods.length - 1].value;
         
@@ -912,7 +592,7 @@ function calculateTrend(periods: PeriodData[]): number | undefined {
             if (Math.abs(lastValue) < 0.0001) {
                 return 0;
             }
-            return undefined; // Can't calculate from zero
+            return undefined;
         }
         
         const trend = ((lastValue - firstValue) / Math.abs(firstValue)) * 100;
@@ -922,33 +602,26 @@ function calculateTrend(periods: PeriodData[]): number | undefined {
         return trend;
     }
     
-    // Sort by date
     validPeriods.sort((a, b) => {
         if (!a.date || !b.date) return 0;
         return a.date.getTime() - b.date.getTime();
     });
     
-    // Get min and max date periods
     const minPeriod = validPeriods[0];
     const maxPeriod = validPeriods[validPeriods.length - 1];
     
     const minValue = minPeriod.value;
     const maxValue = maxPeriod.value;
     
-    // Handle zero values more carefully
     if (Math.abs(minValue) < 0.0001) {
-        // If min value is essentially zero, return undefined
         if (Math.abs(maxValue) < 0.0001) {
-            return 0; // Both are zero, no change
+            return 0;
         }
-        // Can't calculate meaningful percentage change from zero
         return undefined;
     }
     
-    // Calculate percentage change: ((max date value - min date value) / |min date value|) * 100
     const trend = ((maxValue - minValue) / Math.abs(minValue)) * 100;
     
-    // Return the trend, handling edge cases
     if (isNaN(trend) || !isFinite(trend)) {
         return undefined;
     }
@@ -956,130 +629,48 @@ function calculateTrend(periods: PeriodData[]): number | undefined {
     return trend;
 }
 
+/**
+ * Map amounts to tree nodes and aggregate upward
+ */
 function mapAmountsToTree(
     tree: DriverTreeNode[],
-    accountingFacts: Map<string, PeriodData[]>,
-    rateFacts: Map<string, PeriodData[]> | Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }>
+    accountingFacts: Map<string, PeriodData[]>
 ): void {
-    // Check if rateFacts is the new Fee Rate Fact structure
-    const rateFactsValues = Array.from(rateFacts.values() as any);
-    const isFeeRateFactStructure = rateFacts.size > 0 && 
-        rateFactsValues[0] && 
-        typeof rateFactsValues[0] === 'object' && 
-        'feeRate' in rateFactsValues[0];
-    // Map amounts to all nodes (not just leaf nodes) to populate "Increase Rates" section
+    // Map amounts to all nodes
     const mapToNode = (node: DriverTreeNode) => {
-        const isLeaf = !node.children || node.children.length === 0;
-        
-        // Check if this node is part of "Increase Rates" section
-        const isIncreaseRateNode = node.name.toLowerCase().includes('increase rate') || 
-                                  node.name.toLowerCase().includes('rate');
-        
-        // Map to all nodes, not just leaf nodes, especially for Increase Rates section
-        const shouldMap = isLeaf || isIncreaseRateNode;
-        
-        if (shouldMap) {
-            // Try to find matching fact by name (case-insensitive, exact or partial match)
-            // Try exact match first
-            let accountingMatched = false;
-            let rateMatched = false;
+        // Try to find matching fact by name (case-insensitive, exact or partial match)
+        let accountingMatched = false;
 
+        for (const [factKey, periods] of accountingFacts.entries()) {
+            const factKeyLower = factKey.toLowerCase().trim();
+            const nodeNameLower = node.name.toLowerCase().trim();
+            
+            // Exact match
+            if (factKeyLower === nodeNameLower) {
+                node.accountingPeriods = periods;
+                node.accountingAmount = periods.length > 0 ? periods[periods.length - 1].value : 0;
+                node.accountingTrend = calculateTrend(periods);
+                accountingMatched = true;
+                break;
+            }
+        }
+
+        // If no exact match, try partial match
+        if (!accountingMatched) {
             for (const [factKey, periods] of accountingFacts.entries()) {
                 const factKeyLower = factKey.toLowerCase().trim();
                 const nodeNameLower = node.name.toLowerCase().trim();
                 
-                // Exact match
-                if (factKeyLower === nodeNameLower) {
+                if (factKeyLower.includes(nodeNameLower) || nodeNameLower.includes(factKeyLower)) {
                     node.accountingPeriods = periods;
                     node.accountingAmount = periods.length > 0 ? periods[periods.length - 1].value : 0;
                     node.accountingTrend = calculateTrend(periods);
-                    accountingMatched = true;
                     break;
-                }
-            }
-
-            // If no exact match, try partial match
-            if (!accountingMatched) {
-                for (const [factKey, periods] of accountingFacts.entries()) {
-                    const factKeyLower = factKey.toLowerCase().trim();
-                    const nodeNameLower = node.name.toLowerCase().trim();
-                    
-                    if (factKeyLower.includes(nodeNameLower) || nodeNameLower.includes(factKeyLower)) {
-                        node.accountingPeriods = periods;
-                        node.accountingAmount = periods.length > 0 ? periods[periods.length - 1].value : 0;
-                        node.accountingTrend = calculateTrend(periods);
-                        break;
-                    }
-                }
-            }
-
-            // Handle rate facts - check if it's Fee Rate Fact structure or legacy
-            if (isFeeRateFactStructure) {
-                // New Fee Rate Fact structure
-                for (const [factKey, rateData] of (rateFacts as Map<string, { feeRate: PeriodData[]; rawAmount: PeriodData[]; accountedAmount: PeriodData[] }>).entries()) {
-                    const factKeyLower = factKey.toLowerCase().trim();
-                    const nodeNameLower = node.name.toLowerCase().trim();
-                    
-                    const isMatch = factKeyLower === nodeNameLower || 
-                                   factKeyLower.includes(nodeNameLower) || 
-                                   nodeNameLower.includes(factKeyLower);
-                    
-                    if (isMatch) {
-                        node.isFeeRateDriver = true;
-                        node.ratePeriods = rateData.feeRate;
-                        node.rateAmount = rateData.feeRate.length > 0 ? rateData.feeRate[rateData.feeRate.length - 1].value : 0;
-                        node.rawAmount = rateData.rawAmount.length > 0 ? rateData.rawAmount[rateData.rawAmount.length - 1].value : 0;
-                        node.feeRate = node.rateAmount;
-                        node.rateTrend = calculateTrend(rateData.feeRate);
-                        
-                        // For Increase Rates section, show Fee Rate as percentage
-                        // Don't override accounting amount if it's already set from Accounting Fact
-                        // Only set from Fee Rate Fact if this is a Fee Rate driver and no accounting amount exists
-                        if (rateData.accountedAmount.length > 0 && !node.accountingAmount) {
-                            node.accountingPeriods = rateData.accountedAmount;
-                            node.accountingAmount = rateData.accountedAmount[rateData.accountedAmount.length - 1].value;
-                            node.accountingTrend = calculateTrend(rateData.accountedAmount);
-                        }
-                        
-                        rateMatched = true;
-                        break;
-                    }
-                }
-            } else {
-                // Legacy Rate Fact structure (Rate Fact tab - not Fee Rate Fact)
-                for (const [factKey, periods] of (rateFacts as Map<string, PeriodData[]>).entries()) {
-                    const factKeyLower = factKey.toLowerCase().trim();
-                    const nodeNameLower = node.name.toLowerCase().trim();
-                    
-                    // Try exact match first
-                    if (factKeyLower === nodeNameLower) {
-                        node.ratePeriods = periods;
-                        node.rateAmount = periods.length > 0 ? periods[periods.length - 1].value : 0;
-                        node.rateTrend = calculateTrend(periods);
-                        rateMatched = true;
-                        break;
-                    }
-                }
-
-                // If no exact match, try partial match
-                if (!rateMatched) {
-                    for (const [factKey, periods] of (rateFacts as Map<string, PeriodData[]>).entries()) {
-                        const factKeyLower = factKey.toLowerCase().trim();
-                        const nodeNameLower = node.name.toLowerCase().trim();
-                        
-                        if (factKeyLower.includes(nodeNameLower) || nodeNameLower.includes(factKeyLower)) {
-                            node.ratePeriods = periods;
-                            node.rateAmount = periods.length > 0 ? periods[periods.length - 1].value : 0;
-                            node.rateTrend = calculateTrend(periods);
-                            rateMatched = true;
-                            break;
-                        }
-                    }
                 }
             }
         }
 
-        // Recursively map children first
+        // Recursively map children
         if (node.children) {
             node.children.forEach(child => mapToNode(child));
         }
@@ -1088,56 +679,30 @@ function mapAmountsToTree(
     // Map amounts to all nodes
     tree.forEach(node => mapToNode(node));
 
-    // Now aggregate amounts and trends upward from children to parents
+    // Aggregate amounts upward from children to parents
     const aggregateUpward = (node: DriverTreeNode): { 
         accounting: number; 
-        rate: number;
         accountingPeriods: PeriodData[];
-        ratePeriods: PeriodData[];
     } => {
         let accountingTotal = node.accountingAmount || 0;
-        let rateTotal = node.rateAmount || 0;
         let accountingPeriods: PeriodData[] = node.accountingPeriods ? [...node.accountingPeriods] : [];
-        let ratePeriods: PeriodData[] = node.ratePeriods ? [...node.ratePeriods] : [];
 
         // Sum from children
         if (node.children && node.children.length > 0) {
             node.children.forEach(child => {
                 const childTotals = aggregateUpward(child);
                 accountingTotal += childTotals.accounting;
-                rateTotal += childTotals.rate;
                 
-                // Aggregate periods by summing corresponding period values
-                // Match periods by period name/date, not just index
                 if (childTotals.accountingPeriods.length > 0) {
                     if (accountingPeriods.length === 0) {
                         accountingPeriods = childTotals.accountingPeriods.map(p => ({ ...p }));
                     } else {
-                        // Match periods by period name/date
                         childTotals.accountingPeriods.forEach(childPeriod => {
                             const matchingPeriod = accountingPeriods.find(p => p.period === childPeriod.period);
                             if (matchingPeriod) {
                                 matchingPeriod.value += childPeriod.value;
                             } else {
-                                // If no match, add as new period
                                 accountingPeriods.push({ ...childPeriod });
-                            }
-                        });
-                    }
-                }
-                
-                if (childTotals.ratePeriods.length > 0) {
-                    if (ratePeriods.length === 0) {
-                        ratePeriods = childTotals.ratePeriods.map(p => ({ ...p }));
-                    } else {
-                        // Match periods by period name/date
-                        childTotals.ratePeriods.forEach(childPeriod => {
-                            const matchingPeriod = ratePeriods.find(p => p.period === childPeriod.period);
-                            if (matchingPeriod) {
-                                matchingPeriod.value += childPeriod.value;
-                            } else {
-                                // If no match, add as new period
-                                ratePeriods.push({ ...childPeriod });
                             }
                         });
                     }
@@ -1151,17 +716,10 @@ function mapAmountsToTree(
             node.accountingAmount = accountingTotal;
             node.accountingTrend = calculateTrend(accountingPeriods);
         }
-        if (ratePeriods.length > 0) {
-            node.ratePeriods = ratePeriods;
-            node.rateAmount = rateTotal;
-            node.rateTrend = calculateTrend(ratePeriods);
-        }
 
         return { 
             accounting: accountingTotal, 
-            rate: rateTotal,
-            accountingPeriods,
-            ratePeriods
+            accountingPeriods
         };
     };
 
@@ -1186,3 +744,32 @@ export function flattenTree(nodes: DriverTreeNode[]): DriverTreeNode[] {
     return result;
 }
 
+/**
+ * Join Fact_Margin records with dimension tables
+ * @param factMarginRecord - Record from Fact_Margin
+ * @param dimensionTables - Map of dimension tables
+ * @param idFieldName - Name of ID field in Fact_Margin (e.g., "LegalEntityID")
+ * @param dimensionTableName - Name of dimension table (e.g., "Dim_LegalEntity")
+ */
+export function joinFactWithDimension(
+    factMarginRecord: FactMarginRecord,
+    dimensionTables: DimensionTables,
+    idFieldName: string,
+    dimensionTableName: string
+): DimensionRecord | null {
+    const idValue = factMarginRecord[idFieldName];
+    if (!idValue) return null;
+    
+    const dimensionTable = dimensionTables.get(dimensionTableName);
+    if (!dimensionTable) return null;
+    
+    const idStr = String(idValue).trim();
+    return dimensionTable.get(idStr) || null;
+}
+
+/**
+ * Get all dimension table names
+ */
+export function getDimensionTableNames(dimensionTables: DimensionTables): string[] {
+    return Array.from(dimensionTables.keys());
+}

@@ -6,7 +6,8 @@ export interface StoredExcelData {
     data: {
         tree: any[];
         accountingFacts: [string, any[]][];
-        rateFacts: [string, any[]][];
+        factMarginRecords: any[];
+        dimensionTables: { [key: string]: { [id: string]: any } };
     };
     uploadedAt: string;
     uploadedBy?: string;

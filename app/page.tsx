@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
-import { ExcelDriverTreeData } from '@/lib/excel-parser';
+import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames } from '@/lib/excel-parser';
 import { extractExecutiveSummaryMetrics } from '@/lib/excel-metrics';
 
 const personalizedInsights = [
@@ -440,9 +440,8 @@ export default function HomePage() {
                         const restoredData: ExcelDriverTreeData = {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
-                            rateFacts: new Map(parsed.rateFacts || []) as Map<string, any>,
-                            accountingFactRecords: parsed.accountingFactRecords || [],
-                            productDIM: new Map(parsed.productDIM || [])
+                            factMarginRecords: parsed.factMarginRecords || [],
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
                         };
                         setExcelData(restoredData);
                     }
@@ -662,8 +661,8 @@ export default function HomePage() {
         // Simulate AI processing delay
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // Generate context-aware response based on query
-        const results = generateAIResponse(searchQuery);
+        // Generate context-aware response based on query using Excel data
+        const results = generateAIResponse(searchQuery, excelData, excelMetrics);
         setSearchResults(results);
         setIsSearching(false);
     };
@@ -674,10 +673,820 @@ export default function HomePage() {
         }
     };
 
-    // AI Response Generator
-    const generateAIResponse = (query: string) => {
-        const lowerQuery = query.toLowerCase();
+    // Intelligent Excel data analyzer - finds any metric/driver based on query intent
+    const analyzeExcelData = (query: string, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        if (!excelData || !excelMetrics) return null;
 
+        const lowerQuery = query.toLowerCase();
+        const results: any = {
+            hasData: false,
+            metrics: {},
+            nodes: [],
+            trends: {},
+            comparisons: [],
+            allNodes: []
+        };
+
+        // Recursively find all nodes in the tree
+        const getAllNodes = (nodes: any[]): any[] => {
+            const all: any[] = [];
+            nodes.forEach(node => {
+                all.push(node);
+                if (node.children && node.children.length > 0) {
+                    all.push(...getAllNodes(node.children));
+                }
+            });
+            return all;
+        };
+
+        // Get all nodes from the tree
+        if (excelData.tree && excelData.tree.length > 0) {
+            results.allNodes = getAllNodes(excelData.tree);
+        }
+
+        // Intelligent keyword matching with synonyms
+        const keywordMap: { [key: string]: string[] } = {
+            revenue: ['revenue', 'sales', 'income', 'earnings', 'top line'],
+            expense: ['expense', 'cost', 'spend', 'expenditure', 'outlay'],
+            profit: ['profit', 'net income', 'earnings', 'bottom line'],
+            margin: ['margin', 'profitability', 'ebit', 'ebitda'],
+            aum: ['aum', 'assets under management', 'assets', 'funds'],
+            volume: ['volume', 'quantity', 'units', 'production', 'output'],
+            cost: ['cost', 'expense', 'spending', 'outlay'],
+            cash: ['cash', 'liquidity', 'working capital'],
+            investment: ['investment', 'capex', 'capital expenditure'],
+            flows: ['flows', 'net flows', 'cash flows', 'fund flows', 'inflows', 'outflows'],
+            returns: ['returns', 'market returns', 'return', 'performance', 'yield'],
+            fees: ['fees', 'fee', 'charges', 'fee income'],
+            expenses: ['expenses', 'expense', 'costs', 'spending']
+        };
+
+        // Find nodes matching query keywords (fuzzy matching)
+        const findMatchingNodes = (queryText: string): any[] => {
+            const found: any[] = [];
+            const queryWords = queryText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+            
+            results.allNodes.forEach((node: any) => {
+                const nodeName = node.name.toLowerCase();
+                let matchScore = 0;
+                
+                // Direct keyword match
+                queryWords.forEach(word => {
+                    if (nodeName.includes(word)) {
+                        matchScore += 10;
+                    }
+                });
+                
+                // Synonym matching
+                Object.keys(keywordMap).forEach(key => {
+                    if (keywordMap[key].some(syn => queryText.includes(syn))) {
+                        keywordMap[key].forEach(syn => {
+                            if (nodeName.includes(syn)) {
+                                matchScore += 5;
+                            }
+                        });
+                    }
+                });
+                
+                if (matchScore > 0) {
+                    found.push({ ...node, matchScore });
+                }
+            });
+            
+            // Sort by match score and return top matches
+            return found.sort((a, b) => b.matchScore - a.matchScore);
+        };
+
+        // Extract metrics from excelMetrics
+        if (excelMetrics) {
+            if (excelMetrics.totalRevenue !== undefined) {
+                results.metrics.revenue = excelMetrics.totalRevenue;
+                results.hasData = true;
+            }
+            if (excelMetrics.totalCosts !== undefined) {
+                results.metrics.costs = excelMetrics.totalCosts;
+                results.hasData = true;
+            }
+            if (excelMetrics.totalProfit !== undefined) {
+                results.metrics.profit = excelMetrics.totalProfit;
+                results.hasData = true;
+            }
+            if (excelMetrics.profitMargin !== undefined) {
+                results.metrics.profitMargin = excelMetrics.profitMargin;
+                results.hasData = true;
+            }
+            if (excelMetrics.volume !== undefined) {
+                results.metrics.volume = excelMetrics.volume;
+                results.hasData = true;
+            }
+            if (excelMetrics.revenueTrend !== undefined) {
+                results.metrics.revenueTrend = excelMetrics.revenueTrend;
+            }
+        }
+
+        // Find matching nodes based on query
+        results.nodes = findMatchingNodes(lowerQuery);
+
+        // Check for comparison queries (e.g., "revenue vs expenses", "revenue vs AUM")
+        const comparisonKeywords = ['vs', 'versus', 'compared to', 'compare', 'against', 'and'];
+        const hasComparison = comparisonKeywords.some(kw => lowerQuery.includes(kw));
+        
+        if (hasComparison) {
+            // Split query by comparison keyword
+            const comparisonParts = lowerQuery.split(/\s+(vs|versus|compared to|compare|against|and)\s+/);
+            if (comparisonParts.length >= 2) {
+                const firstTerm = comparisonParts[0].trim();
+                const secondTerm = comparisonParts[comparisonParts.length - 1].trim();
+                
+                const firstNodes = findMatchingNodes(firstTerm);
+                const secondNodes = findMatchingNodes(secondTerm);
+                
+                results.comparisons = [
+                    { term: firstTerm, nodes: firstNodes },
+                    { term: secondTerm, nodes: secondNodes }
+                ];
+            }
+        }
+
+        // Extract period trends for all matching nodes
+        if (results.nodes.length > 0 && excelData.accountingFacts) {
+            results.nodes.forEach((node: any) => {
+                const periods = excelData.accountingFacts.get(node.id);
+                if (periods && periods.length > 0) {
+                    const firstValue = periods[0].value;
+                    const lastValue = periods[periods.length - 1].value;
+                    const change = firstValue !== 0 ? ((lastValue - firstValue) / Math.abs(firstValue)) * 100 : 0;
+                    
+                    results.trends[node.id] = {
+                        nodeName: node.name,
+                        periods: periods.map((p: any, idx: number) => ({
+                            period: p.period || `Period ${idx + 1}`,
+                            value: p.value,
+                            index: idx
+                        })),
+                        latest: lastValue,
+                        first: firstValue,
+                        change: change,
+                        periodCount: periods.length
+                    };
+                }
+            });
+        }
+
+        // Extract trends for comparison nodes
+        if (results.comparisons.length > 0 && excelData.accountingFacts) {
+            results.comparisons.forEach((comp: any) => {
+                comp.nodes.forEach((node: any) => {
+                    const periods = excelData.accountingFacts.get(node.id);
+                    if (periods && periods.length > 0) {
+                        if (!results.trends[node.id]) {
+                            const firstValue = periods[0].value;
+                            const lastValue = periods[periods.length - 1].value;
+                            const change = firstValue !== 0 ? ((lastValue - firstValue) / Math.abs(firstValue)) * 100 : 0;
+                            
+                            results.trends[node.id] = {
+                                nodeName: node.name,
+                                periods: periods.map((p: any, idx: number) => ({
+                                    period: p.period || `Period ${idx + 1}`,
+                                    value: p.value,
+                                    index: idx
+                                })),
+                                latest: lastValue,
+                                first: firstValue,
+                                change: change,
+                                periodCount: periods.length
+                            };
+                        }
+                    }
+                });
+            });
+        }
+
+        // Check for dimension-based queries (e.g., "by product segment", "product mix", "by segment")
+        // Also detect patterns like "product mix of X", "X by product segment", "X by segment"
+        const dimensionKeywords = ['by product segment', 'by segment', 'product mix', 'by product', 'segment breakdown', 'by dimension', 'segment'];
+        const dimensionPatterns = [
+            /product mix of (.+)/i,
+            /(.+) by product segment/i,
+            /(.+) by segment/i,
+            /(.+) product mix/i,
+            /segment.*of (.+)/i
+        ];
+        
+        const hasExplicitDimension = dimensionKeywords.some(kw => lowerQuery.includes(kw));
+        const matchesDimensionPattern = dimensionPatterns.some(pattern => pattern.test(lowerQuery));
+        const needsDimensionAnalysis = hasExplicitDimension || matchesDimensionPattern;
+        
+        if (needsDimensionAnalysis && excelData.factMarginRecords && excelData.factMarginRecords.length > 0 && excelData.dimensionTables && excelData.dimensionTables.size > 0) {
+            // Extract metric name from query
+            let metricNameFromQuery = '';
+            if (matchesDimensionPattern) {
+                for (const pattern of dimensionPatterns) {
+                    const match = lowerQuery.match(pattern);
+                    if (match && match[1]) {
+                        metricNameFromQuery = match[1].trim();
+                        break;
+                    }
+                }
+            }
+            
+            // If no metric extracted, try to get it from query words (remove dimension keywords)
+            if (!metricNameFromQuery) {
+                const words = lowerQuery.split(/\s+/);
+                const filteredWords = words.filter(w => 
+                    w.length > 2 && 
+                    !dimensionKeywords.some(kw => kw.includes(w) || w.includes(kw.split(' ')[0]))
+                );
+                metricNameFromQuery = filteredWords.join(' ');
+            }
+            
+            // Find the metric/driver node - search by name matching
+            let metricNode = null;
+            if (metricNameFromQuery) {
+                // First try exact match from results.nodes
+                metricNode = results.nodes.find((n: any) => 
+                    n.name.toLowerCase().includes(metricNameFromQuery.toLowerCase()) ||
+                    metricNameFromQuery.toLowerCase().includes(n.name.toLowerCase())
+                );
+                
+                // If not found, search all nodes
+                if (!metricNode && results.allNodes.length > 0) {
+                    const metricNameLower = metricNameFromQuery.toLowerCase();
+                    for (const node of results.allNodes) {
+                        const nodeNameLower = node.name.toLowerCase();
+                        // Check if metric name matches node name (either direction)
+                        if (nodeNameLower.includes(metricNameLower) || metricNameLower.includes(nodeNameLower)) {
+                            metricNode = node;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Create a map of driverId to node name for matching
+            const driverIdToNodeName = new Map<string, string>();
+            results.allNodes.forEach((node: any) => {
+                if (node.id) {
+                    driverIdToNodeName.set(node.id, node.name.toLowerCase());
+                }
+            });
+            
+            // Join factMarginRecords with dimension tables using ID fields
+            const dimensionData: { [segment: string]: { total: number; count: number; records: any[] } } = {};
+            let matchedDriverIds = new Set<string>();
+            
+            // Get all dimension table names
+            const dimTableNames = getDimensionTableNames(excelData.dimensionTables);
+            
+            // For each dimension table, try to join with factMarginRecords
+            dimTableNames.forEach(dimTableName => {
+                // Find the ID field name (e.g., "LegalEntityID" for "Dim_LegalEntity")
+                const idFieldName = dimTableName.replace('Dim_', '').replace('DIM_', '') + 'ID';
+                
+                excelData.factMarginRecords.forEach((record: any) => {
+                    if (!record[idFieldName]) return;
+                    
+                    const dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                    if (!dimRecord) return;
+                
+                // If we have a specific metric node, only include records for that driver
+                let shouldInclude = false;
+                if (metricNode) {
+                    shouldInclude = record.driverId === metricNode.id;
+                } else {
+                    // If no specific node, try to match by name
+                    const driverName = driverIdToNodeName.get(record.driverId);
+                    if (driverName && metricNameFromQuery) {
+                        shouldInclude = driverName.includes(metricNameFromQuery.toLowerCase()) ||
+                                       metricNameFromQuery.toLowerCase().includes(driverName);
+                    } else {
+                        // If we can't match, include all records for dimension queries
+                        shouldInclude = true;
+                    }
+                }
+                
+                if (shouldInclude) {
+                    // Find segment field in dimension record (look for common field names)
+                    const segmentField = Object.keys(dimRecord).find(key => 
+                        key.toLowerCase().includes('segment') || 
+                        key.toLowerCase().includes('category') ||
+                        key.toLowerCase().includes('name') ||
+                        key.toLowerCase().includes('type')
+                    );
+                    const segment = segmentField ? String(dimRecord[segmentField] || 'Unknown') : 'Unknown';
+                    
+                    // Calculate amount from record - sum all numeric fields that match Driver Level 4 names
+                    let amount = 0;
+                    if (metricNode) {
+                        // If we have a specific metric node, try to find matching amount field
+                        const amountField = Object.keys(record).find(key => 
+                            key.toLowerCase().includes(metricNode.name.toLowerCase())
+                        );
+                        if (amountField) {
+                            const value = record[amountField];
+                            amount = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, '')) || 0;
+                        }
+                    } else {
+                        // Sum all numeric fields (excluding ID and period fields)
+                        Object.keys(record).forEach(key => {
+                            if (!key.toLowerCase().includes('id') && !key.toLowerCase().includes('period') && !key.toLowerCase().includes('date')) {
+                                const value = record[key];
+                                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                                if (!isNaN(numValue)) {
+                                    amount += numValue;
+                                }
+                            }
+                        });
+                    }
+                    
+                    if (!dimensionData[segment]) {
+                        dimensionData[segment] = { total: 0, count: 0, records: [] };
+                    }
+                    dimensionData[segment].total += amount;
+                    dimensionData[segment].count += 1;
+                    dimensionData[segment].records.push(record);
+                }
+                });
+            });
+            
+            // If we found data, create breakdown
+            if (Object.keys(dimensionData).length > 0) {
+                const total = Object.values(dimensionData).reduce((sum: number, d: any) => sum + d.total, 0);
+                const finalMetricName = metricNode ? metricNode.name : 
+                                      (metricNameFromQuery || results.nodes[0]?.name || 'Total');
+                
+                results.dimensionBreakdown = {
+                    metricName: finalMetricName,
+                    metricId: metricNode?.id || Array.from(matchedDriverIds)[0] || 'all',
+                    breakdown: Object.keys(dimensionData).map(segment => ({
+                        segment,
+                        total: dimensionData[segment].total,
+                        count: dimensionData[segment].count,
+                        percentage: total > 0 ? (dimensionData[segment].total / total) * 100 : 0
+                    })).sort((a, b) => b.total - a.total)
+                };
+                results.hasData = true;
+            }
+        }
+
+        return results.hasData || results.nodes.length > 0 ? results : null;
+    };
+
+    // AI Response Generator - flexible, intelligent search using Excel data
+    const generateAIResponse = (query: string, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        const lowerQuery = query.toLowerCase();
+        
+        // Analyze Excel data intelligently
+        const analysis = analyzeExcelData(query, excelData, excelMetrics);
+
+        // If we have Excel data, generate intelligent response from it
+        if (analysis && (analysis.hasData || analysis.nodes.length > 0)) {
+            return generateIntelligentResponse(query, analysis, excelData, excelMetrics);
+        }
+
+        // Fallback to hardcoded responses only if no Excel data available
+        return generateFallbackResponse(query, lowerQuery);
+    };
+
+    // Generate intelligent response from Excel data analysis
+    const generateIntelligentResponse = (query: string, analysis: any, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        const lowerQuery = query.toLowerCase();
+        
+        // Handle dimension-based queries FIRST (e.g., "product mix", "by product segment")
+        if (analysis.dimensionBreakdown) {
+            return generateDimensionResponse(analysis, excelData);
+        }
+
+        // Handle comparison queries (e.g., "revenue vs expenses", "revenue vs AUM")
+        if (analysis.comparisons && analysis.comparisons.length >= 2) {
+            return generateComparisonResponse(analysis, excelData);
+        }
+
+        // Handle trend queries (e.g., "trend in revenue", "how is revenue changing")
+        const isTrendQuery = lowerQuery.includes('trend') || lowerQuery.includes('change') || 
+                           lowerQuery.includes('over time') || lowerQuery.includes('period') ||
+                           lowerQuery.includes('growing') || lowerQuery.includes('declining');
+        
+        if (isTrendQuery && Object.keys(analysis.trends).length > 0) {
+            return generateTrendResponse(analysis, excelData);
+        }
+
+        // Handle specific metric queries
+        return generateMetricResponse(query, analysis, excelData, excelMetrics);
+    };
+
+    // Generate response for dimension-based queries (e.g., "product mix", "by product segment")
+    const generateDimensionResponse = (analysis: any, excelData: ExcelDriverTreeData | null) => {
+        let breakdown = analysis.dimensionBreakdown;
+        if (!breakdown || !breakdown.breakdown || breakdown.breakdown.length === 0) {
+            // If no breakdown was created, try to create one on the fly
+            if (excelData && excelData.factMarginRecords && excelData.dimensionTables && excelData.dimensionTables.size > 0) {
+                const dimensionData: { [segment: string]: { total: number; count: number } } = {};
+                const dimTableNames = getDimensionTableNames(excelData.dimensionTables);
+                
+                dimTableNames.forEach(dimTableName => {
+                    const idFieldName = dimTableName.replace('Dim_', '').replace('DIM_', '') + 'ID';
+                    
+                    excelData.factMarginRecords.forEach((record: any) => {
+                        if (!record[idFieldName]) return;
+                        
+                        const dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
+                        if (!dimRecord) return;
+                        
+                        const segmentField = Object.keys(dimRecord).find(key => 
+                            key.toLowerCase().includes('segment') || 
+                            key.toLowerCase().includes('category') ||
+                            key.toLowerCase().includes('name')
+                        );
+                        const segment = segmentField ? String(dimRecord[segmentField] || 'Unknown') : 'Unknown';
+                        
+                        // Sum numeric fields from record
+                        let amount = 0;
+                        Object.keys(record).forEach(key => {
+                            if (!key.toLowerCase().includes('id') && !key.toLowerCase().includes('period') && !key.toLowerCase().includes('date')) {
+                                const value = record[key];
+                                const numValue = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+                                if (!isNaN(numValue)) {
+                                    amount += numValue;
+                                }
+                            }
+                        });
+                        
+                        if (!dimensionData[segment]) {
+                            dimensionData[segment] = { total: 0, count: 0 };
+                        }
+                        dimensionData[segment].total += amount;
+                        dimensionData[segment].count += 1;
+                    });
+                });
+                
+                if (Object.keys(dimensionData).length > 0) {
+                    const total = Object.values(dimensionData).reduce((sum: number, d: any) => sum + d.total, 0);
+                    breakdown = {
+                        metricName: analysis.nodes[0]?.name || 'Total',
+                        metricId: 'all',
+                        breakdown: Object.keys(dimensionData).map(segment => ({
+                            segment,
+                            total: dimensionData[segment].total,
+                            count: dimensionData[segment].count,
+                            percentage: total > 0 ? (dimensionData[segment].total / total) * 100 : 0
+                        })).sort((a, b) => b.total - a.total)
+                    };
+                }
+            }
+            
+            if (!breakdown || !breakdown.breakdown || breakdown.breakdown.length === 0) {
+                return generateMetricResponse("", analysis, excelData, null);
+            }
+        }
+
+        const total = breakdown.breakdown.reduce((sum: number, item: any) => sum + item.total, 0);
+        const keyFindings: any[] = breakdown.breakdown.map((item: any, idx: number) => ({
+            title: `${item.segment}`,
+            detail: `$${(item.total / 1000000).toFixed(2)}B (${item.percentage.toFixed(1)}% of total)`,
+            confidence: 95 - (idx * 2)
+        }));
+
+        // Add summary finding
+        keyFindings.unshift({
+            title: "Total",
+            detail: `$${(total / 1000000).toFixed(2)}B across ${breakdown.breakdown.length} product segments`,
+            confidence: 98
+        });
+
+        return {
+            summary: `${breakdown.metricName} breakdown by Product Segment: ${breakdown.breakdown.length} segments with total of $${(total / 1000000).toFixed(2)}B`,
+            keyFindings,
+            visualizations: {
+                segmentBreakdown: {
+                    type: 'pie',
+                    title: `${breakdown.metricName} by Product Segment`,
+                    data: breakdown.breakdown.map((item: any) => ({
+                        name: item.segment,
+                        value: item.total / 1000000,
+                        percentage: item.percentage
+                    }))
+                },
+                segmentBar: {
+                    type: 'bar',
+                    title: `${breakdown.metricName} by Product Segment`,
+                    data: breakdown.breakdown.map((item: any) => ({
+                        segment: item.segment,
+                        value: item.total / 1000000,
+                        percentage: item.percentage
+                    }))
+                }
+            },
+            relatedDrivers: [
+                {
+                    category: "Product Segments",
+                    drivers: breakdown.breakdown.map((item: any) => item.segment),
+                    impact: "High"
+                }
+            ],
+            recommendations: [
+                "Review detailed breakdown by product segment in driver tree",
+                "Analyze trends for each product segment",
+                "Compare segment performance against targets",
+                "Identify opportunities for segment optimization"
+            ],
+            dataSource: "Excel Upload Data (Joined Accounting Fact + Product DIM)",
+            lastUpdated: "Real-time from uploaded Excel file",
+            dataQuality: {
+                completeness: 95,
+                accuracy: 98,
+                timeliness: 100,
+                methodology: "Data joined from Accounting Fact and Product DIM tables using Product ID"
+            }
+        };
+    };
+
+    // Generate response for comparison queries
+    const generateComparisonResponse = (analysis: any, excelData: ExcelDriverTreeData | null) => {
+        const [firstComp, secondComp] = analysis.comparisons;
+        const firstNodes = firstComp.nodes || [];
+        const secondNodes = secondComp.nodes || [];
+        
+        // Get values for comparison
+        const getNodeValue = (node: any) => {
+            if (node.accountingAmount !== undefined) return node.accountingAmount;
+            if (node.rateAmount !== undefined) return node.rateAmount;
+            return 0;
+        };
+
+        const firstValue = firstNodes.length > 0 ? getNodeValue(firstNodes[0]) : 0;
+        const secondValue = secondNodes.length > 0 ? getNodeValue(secondNodes[0]) : 0;
+        
+        const difference = firstValue - secondValue;
+        const percentDiff = secondValue !== 0 ? (difference / Math.abs(secondValue)) * 100 : 0;
+
+        // Get trends if available
+        const firstTrend = firstNodes.length > 0 ? analysis.trends[firstNodes[0].id] : null;
+        const secondTrend = secondNodes.length > 0 ? analysis.trends[secondNodes[0].id] : null;
+
+        const keyFindings: any[] = [
+            {
+                title: firstComp.term.charAt(0).toUpperCase() + firstComp.term.slice(1),
+                detail: firstNodes.length > 0 
+                    ? `${firstNodes[0].name}: $${(firstValue / 1000000).toFixed(2)}B`
+                    : `Value: $${(firstValue / 1000000).toFixed(2)}B`,
+                confidence: 95
+            },
+            {
+                title: secondComp.term.charAt(0).toUpperCase() + secondComp.term.slice(1),
+                detail: secondNodes.length > 0
+                    ? `${secondNodes[0].name}: $${(secondValue / 1000000).toFixed(2)}B`
+                    : `Value: $${(secondValue / 1000000).toFixed(2)}B`,
+                confidence: 95
+            },
+            {
+                title: "Difference",
+                detail: `$${(Math.abs(difference) / 1000000).toFixed(2)}B ${difference > 0 ? 'higher' : 'lower'} (${Math.abs(percentDiff).toFixed(1)}%)`,
+                confidence: 92
+            }
+        ];
+
+        // Add trend insights if available
+        if (firstTrend || secondTrend) {
+            if (firstTrend) {
+                keyFindings.push({
+                    title: `${firstComp.term} Trend`,
+                    detail: `${firstTrend.nodeName} ${firstTrend.change > 0 ? 'increased' : 'decreased'} by ${Math.abs(firstTrend.change).toFixed(1)}% over ${firstTrend.periodCount} periods`,
+                    confidence: 90
+                });
+            }
+            if (secondTrend) {
+                keyFindings.push({
+                    title: `${secondComp.term} Trend`,
+                    detail: `${secondTrend.nodeName} ${secondTrend.change > 0 ? 'increased' : 'decreased'} by ${Math.abs(secondTrend.change).toFixed(1)}% over ${secondTrend.periodCount} periods`,
+                    confidence: 90
+                });
+            }
+        }
+
+        return {
+            summary: `Comparison: ${firstComp.term} is $${(Math.abs(difference) / 1000000).toFixed(2)}B ${difference > 0 ? 'higher' : 'lower'} than ${secondComp.term} (${Math.abs(percentDiff).toFixed(1)}% difference)`,
+            keyFindings,
+            visualizations: (firstTrend || secondTrend) ? {
+                comparisonChart: {
+                    type: 'bar',
+                    title: 'Comparison',
+                    data: [
+                        { name: firstComp.term, value: firstValue / 1000000 },
+                        { name: secondComp.term, value: secondValue / 1000000 }
+                    ]
+                }
+            } : undefined,
+            relatedDrivers: [
+                {
+                    category: "Comparison Metrics",
+                    drivers: [
+                        ...firstNodes.slice(0, 3).map((n: any) => n.name),
+                        ...secondNodes.slice(0, 3).map((n: any) => n.name)
+                    ],
+                    impact: "High"
+                }
+            ],
+            recommendations: [
+                "Review detailed breakdown in driver tree",
+                "Analyze period trends for both metrics",
+                "Identify drivers contributing to the difference"
+            ],
+            dataSource: "Excel Upload Data",
+            lastUpdated: "Real-time from uploaded Excel file",
+            dataQuality: {
+                completeness: 95,
+                accuracy: 98,
+                timeliness: 100,
+                methodology: "Data extracted from uploaded Excel file"
+            }
+        };
+    };
+
+    // Generate response for trend queries
+    const generateTrendResponse = (analysis: any, excelData: ExcelDriverTreeData | null) => {
+        const trends = Object.values(analysis.trends) as any[];
+        if (trends.length === 0) return null;
+
+        const topTrend = trends[0];
+        const keyFindings: any[] = [
+            {
+                title: "Trend Analysis",
+                detail: `${topTrend.nodeName} ${topTrend.change > 0 ? 'increased' : 'decreased'} by ${Math.abs(topTrend.change).toFixed(1)}% from $${(topTrend.first / 1000000).toFixed(2)}B to $${(topTrend.latest / 1000000).toFixed(2)}B`,
+                confidence: 95
+            }
+        ];
+
+        // Add period-by-period insights
+        if (topTrend.periods.length > 1) {
+            const periodChanges = [];
+            for (let i = 1; i < topTrend.periods.length; i++) {
+                const prev = topTrend.periods[i - 1].value;
+                const curr = topTrend.periods[i].value;
+                const change = prev !== 0 ? ((curr - prev) / Math.abs(prev)) * 100 : 0;
+                periodChanges.push({
+                    period: topTrend.periods[i].period,
+                    change: change
+                });
+            }
+            
+            if (periodChanges.length > 0) {
+                keyFindings.push({
+                    title: "Period Changes",
+                    detail: `Analyzed ${topTrend.periodCount} periods with average change of ${(periodChanges.reduce((sum, p) => sum + Math.abs(p.change), 0) / periodChanges.length).toFixed(1)}% per period`,
+                    confidence: 90
+                });
+            }
+        }
+
+        return {
+            summary: `Trend analysis for ${topTrend.nodeName}: ${topTrend.change > 0 ? 'increasing' : 'decreasing'} by ${Math.abs(topTrend.change).toFixed(1)}% over ${topTrend.periodCount} periods`,
+            keyFindings,
+            visualizations: {
+                trendChart: {
+                    type: 'line',
+                    title: `${topTrend.nodeName} Trend`,
+                    data: topTrend.periods
+                }
+            },
+            relatedDrivers: analysis.nodes.length > 0 ? [
+                {
+                    category: "Related Metrics",
+                    drivers: analysis.nodes.slice(0, 5).map((n: any) => n.name),
+                    impact: "High"
+                }
+            ] : [],
+            recommendations: [
+                "Review detailed period breakdown",
+                "Identify factors driving the trend",
+                "Compare against targets and benchmarks"
+            ],
+            dataSource: "Excel Upload Data",
+            lastUpdated: "Real-time from uploaded Excel file",
+            dataQuality: {
+                completeness: 95,
+                accuracy: 98,
+                timeliness: 100,
+                methodology: "Data extracted from uploaded Excel file"
+            }
+        };
+    };
+
+    // Generate response for specific metric queries
+    const generateMetricResponse = (query: string, analysis: any, excelData: ExcelDriverTreeData | null, excelMetrics: any) => {
+        const lowerQuery = query.toLowerCase();
+        
+        // Find the most relevant node
+        const topNode = analysis.nodes.length > 0 ? analysis.nodes[0] : null;
+        const nodeValue = topNode ? (topNode.accountingAmount || topNode.rateAmount || 0) : 0;
+        const nodeTrend = topNode ? analysis.trends[topNode.id] : null;
+
+        // Build response based on what we found
+        const keyFindings: any[] = [];
+
+        if (topNode) {
+            keyFindings.push({
+                title: topNode.name,
+                detail: topNode.rateAmount !== undefined 
+                    ? `Rate: ${(topNode.rateAmount * 100).toFixed(1)}%`
+                    : `Value: $${(nodeValue / 1000000).toFixed(2)}B`,
+                confidence: 95
+            });
+        }
+
+        // Add trend if available
+        if (nodeTrend) {
+            keyFindings.push({
+                title: "Trend Analysis",
+                detail: `${nodeTrend.change > 0 ? 'Increased' : 'Decreased'} by ${Math.abs(nodeTrend.change).toFixed(1)}% over ${nodeTrend.periodCount} periods`,
+                confidence: 92
+            });
+        }
+
+        // Add metric insights
+        if (analysis.metrics.revenue !== undefined && (lowerQuery.includes('revenue') || lowerQuery.includes('sales'))) {
+            keyFindings.push({
+                title: "Total Revenue",
+                detail: `$${(analysis.metrics.revenue / 1000000).toFixed(2)}B from your Excel data`,
+                confidence: 98
+            });
+        }
+
+        if (analysis.metrics.costs !== undefined && (lowerQuery.includes('cost') || lowerQuery.includes('expense'))) {
+            keyFindings.push({
+                title: "Total Costs",
+                detail: `$${(analysis.metrics.costs / 1000000).toFixed(2)}B from your Excel data`,
+                confidence: 98
+            });
+        }
+
+        if (analysis.metrics.profit !== undefined && (lowerQuery.includes('profit') || lowerQuery.includes('margin'))) {
+            keyFindings.push({
+                title: "Total Profit",
+                detail: `$${(analysis.metrics.profit / 1000000).toFixed(2)}B with ${analysis.metrics.profitMargin?.toFixed(1)}% margin`,
+                confidence: 98
+            });
+        }
+
+        // Generate summary
+        let summary = "Based on your Excel data: ";
+        if (topNode) {
+            summary += `${topNode.name} is `;
+            if (topNode.rateAmount !== undefined) {
+                summary += `${(topNode.rateAmount * 100).toFixed(1)}%`;
+            } else {
+                summary += `$${(nodeValue / 1000000).toFixed(2)}B`;
+            }
+            if (nodeTrend) {
+                summary += `, ${nodeTrend.change > 0 ? 'trending up' : 'trending down'} by ${Math.abs(nodeTrend.change).toFixed(1)}%`;
+            }
+        } else if (analysis.metrics.revenue !== undefined) {
+            summary += `Total revenue is $${(analysis.metrics.revenue / 1000000).toFixed(2)}B`;
+        } else {
+            summary += "Found relevant data in your Excel file";
+        }
+
+        return {
+            summary,
+            keyFindings: keyFindings.length > 0 ? keyFindings : [
+                {
+                    title: "Data Found",
+                    detail: `Found ${analysis.nodes.length} relevant metrics in your Excel data`,
+                    confidence: 85
+                }
+            ],
+            visualizations: nodeTrend ? {
+                metricChart: {
+                    type: 'line',
+                    title: `${topNode.name} Over Time`,
+                    data: nodeTrend.periods
+                }
+            } : undefined,
+            relatedDrivers: analysis.nodes.length > 0 ? [
+                {
+                    category: "Related Metrics",
+                    drivers: analysis.nodes.slice(0, 5).map((n: any) => n.name),
+                    impact: "High"
+                }
+            ] : [],
+            recommendations: [
+                "Explore the driver tree for detailed breakdown",
+                nodeTrend ? "Analyze period trends for deeper insights" : "Upload period data for trend analysis",
+                "Compare against other metrics in your data"
+            ],
+            dataSource: "Excel Upload Data",
+            lastUpdated: "Real-time from uploaded Excel file",
+            dataQuality: {
+                completeness: 95,
+                accuracy: 98,
+                timeliness: 100,
+                methodology: "Data extracted from uploaded Excel file"
+            }
+        };
+    };
+
+    // Fallback response generator (only used when no Excel data)
+    const generateFallbackResponse = (query: string, lowerQuery: string) => {
         // Market share related queries
         if (lowerQuery.includes('market share') || lowerQuery.includes('losing share')) {
             return {
@@ -936,6 +1745,7 @@ export default function HomePage() {
 
         // Financial Performance queries
         else if (lowerQuery.includes('ebit') || lowerQuery.includes('margin') || lowerQuery.includes('profitability')) {
+            // Fallback to default response
             return {
                 summary: "EBIT margin is at 12.5%, down 120bps due to commodity inflation, but recovery expected in H2 with pricing actions",
                 keyFindings: [
@@ -993,6 +1803,7 @@ export default function HomePage() {
                 }
             };
         }
+
 
         // Cash Flow queries
         else if (lowerQuery.includes('cash') || lowerQuery.includes('liquidity') || lowerQuery.includes('working capital')) {
@@ -1928,6 +2739,7 @@ export default function HomePage() {
 
         // Default intelligent response
         else {
+            // Fallback to default response
             return {
                 summary: "I've analyzed your query across our business intelligence systems. Here are the most relevant insights:",
                 keyFindings: [
@@ -1959,7 +2771,7 @@ export default function HomePage() {
                     "Set up alerts for critical KPIs",
                     "Schedule deep-dive analysis session"
                 ],
-                dataSource: "Integrated Business Intelligence Platform",
+                dataSource: excelData ? "Excel Upload Data (upload data for specific insights)" : "Integrated Business Intelligence Platform",
                 lastUpdated: "Real-time"
             };
         }
@@ -2004,7 +2816,7 @@ export default function HomePage() {
                         <button
                             onClick={handleAISearch}
                             disabled={isSearching || !searchQuery.trim()}
-                            className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-purple-gradient text-white px-6 py-2 rounded-full hover:shadow-lg hover:shadow-purple-500/50 transition-all border border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-2 rounded-full hover:shadow-lg hover:shadow-green-500/50 transition-all border border-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {isSearching ? (
                                 <div className="flex items-center space-x-2">

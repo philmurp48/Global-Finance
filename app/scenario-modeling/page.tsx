@@ -295,9 +295,8 @@ export default function ScenarioModelingPage() {
                         const restoredData: ExcelDriverTreeData = {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
-                            rateFacts: new Map(parsed.rateFacts || []) as Map<string, any>,
-                            accountingFactRecords: parsed.accountingFactRecords || [],
-                            productDIM: new Map(parsed.productDIM || [])
+                            factMarginRecords: parsed.factMarginRecords || [],
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
                         };
                         setExcelData(restoredData);
                         

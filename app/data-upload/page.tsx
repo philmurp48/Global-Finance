@@ -23,9 +23,8 @@ export default function DataUploadPage() {
                         const restoredData: ExcelDriverTreeData = {
                             tree: parsed.tree || [],
                             accountingFacts: new Map(parsed.accountingFacts || []),
-                            rateFacts: new Map(parsed.rateFacts || []) as Map<string, any>,
-                            accountingFactRecords: parsed.accountingFactRecords || [],
-                            productDIM: new Map(parsed.productDIM || [])
+                            factMarginRecords: parsed.factMarginRecords || [],
+                            dimensionTables: new Map(Object.entries(parsed.dimensionTables || {}).map(([k, v]) => [k, new Map(Object.entries(v as any))]))
                         };
                         setExcelData(restoredData);
                         setUploadStatus('success');
@@ -48,9 +47,13 @@ export default function DataUploadPage() {
             const dataToSave = {
                 tree: data.tree,
                 accountingFacts: Array.from(data.accountingFacts.entries()),
-                rateFacts: Array.from(data.rateFacts.entries() as any),
-                accountingFactRecords: data.accountingFactRecords || [],
-                productDIM: Array.from((data.productDIM || new Map()).entries())
+                factMarginRecords: data.factMarginRecords || [],
+                dimensionTables: Object.fromEntries(
+                    Array.from(data.dimensionTables.entries()).map(([k, v]) => [
+                        k,
+                        Object.fromEntries(v.entries())
+                    ])
+                )
             };
 
             const response = await fetch('/api/excel-data', {
@@ -80,11 +83,16 @@ export default function DataUploadPage() {
             }, 0);
         };
 
+        const totalDimensionRecords = Array.from(excelData.dimensionTables.values()).reduce(
+            (sum, dimTable) => sum + dimTable.size, 0
+        );
+        
         return {
             totalDrivers: totalNodes(excelData.tree),
             accountingFacts: excelData.accountingFacts.size,
-            rateFacts: excelData.rateFacts.size,
-            products: excelData.productDIM?.size || 0
+            factMarginRecords: excelData.factMarginRecords.length,
+            dimensionTables: excelData.dimensionTables.size,
+            dimensionRecords: totalDimensionRecords
         };
     };
 
@@ -119,10 +127,9 @@ export default function DataUploadPage() {
                             Upload an Excel file with the following sheets:
                         </p>
                         <ul className="list-disc list-inside text-sm text-gray-600 mb-6 space-y-2">
-                            <li><strong>Driver Tree</strong> - Hierarchical structure of performance drivers</li>
-                            <li><strong>Accounting Fact</strong> - Accounting amounts by driver and period</li>
-                            <li><strong>Rate Fact</strong> or <strong>Fee Rate Fact</strong> - Rate data by driver and period</li>
-                            <li><strong>Product DIM</strong> (optional) - Product dimension data</li>
+                            <li><strong>Fact_Margin</strong> - Transaction records with amounts/percentages and ID fields</li>
+                            <li><strong>DriverTree</strong> - Driver Level 1-4 hierarchy (amount type fields match Fact_Margin)</li>
+                            <li><strong>DIM_...</strong> - Dimension tables (e.g., Dim_LegalEntity) joined by ID fields</li>
                         </ul>
 
                         <ExcelUpload onDataLoaded={handleDataLoaded} />
@@ -172,16 +179,23 @@ export default function DataUploadPage() {
                                 <div className="bg-gray-50 rounded-lg p-4">
                                     <div className="flex items-center space-x-2 mb-2">
                                         <FileSpreadsheet className="w-5 h-5 text-green-600" />
-                                        <p className="text-sm font-medium text-gray-600">Rate Facts</p>
+                                        <p className="text-sm font-medium text-gray-600">Fact Records</p>
                                     </div>
-                                    <p className="text-2xl font-bold text-gray-900">{summary.rateFacts}</p>
+                                    <p className="text-2xl font-bold text-gray-900">{summary.factMarginRecords}</p>
                                 </div>
                                 <div className="bg-gray-50 rounded-lg p-4">
                                     <div className="flex items-center space-x-2 mb-2">
                                         <Database className="w-5 h-5 text-orange-600" />
-                                        <p className="text-sm font-medium text-gray-600">Products</p>
+                                        <p className="text-sm font-medium text-gray-600">Dimension Tables</p>
                                     </div>
-                                    <p className="text-2xl font-bold text-gray-900">{summary.products}</p>
+                                    <p className="text-2xl font-bold text-gray-900">{summary.dimensionTables}</p>
+                                </div>
+                                <div className="bg-gray-50 rounded-lg p-4">
+                                    <div className="flex items-center space-x-2 mb-2">
+                                        <Database className="w-5 h-5 text-purple-600" />
+                                        <p className="text-sm font-medium text-gray-600">Dimension Records</p>
+                                    </div>
+                                    <p className="text-2xl font-bold text-gray-900">{summary.dimensionRecords}</p>
                                 </div>
                             </div>
                         </div>
