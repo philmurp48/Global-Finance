@@ -2,6 +2,7 @@
 
 import { ExecutionResult } from './types';
 import { formatMetricValue } from './format';
+import { getMeasureByKey } from './dictionary';
 
 /**
  * Build Gemini prompt from execution results
@@ -32,22 +33,24 @@ export function buildNarrationPrompt(result: ExecutionResult, question: string):
                 prompt += `${dimValues} | `;
             }
             
-            // Add measure values - formatting MUST be based on unit
+            // Add measure values - formatting MUST be based on unit (exact lookup, NO guessing)
             const measureValues = Object.entries(row.measures)
                 .map(([k, v]) => {
                     if (v === null || v === undefined) return null;
                     
-                    // Find unit for this measure key
+                    // Determine unit: use exact key lookup, NO guessing from key name
                     let unit: "usd_mm" | "percent" | "count" = "count";
+                    
+                    // If this is the primary metric, use the measure definition from result
                     if (k === result.plan.metric && result.meta.measureDefinition && 'unit' in result.meta.measureDefinition) {
                         unit = result.meta.measureDefinition.unit;
                     } else {
-                        // Infer from key name as fallback
-                        if (k.includes('_$mm') || k.includes('$mm')) {
-                            unit = 'usd_mm';
-                        } else if (k.includes('_pct') || k.includes('Pct') || k === 'MarginPct') {
-                            unit = 'percent';
+                        // For supporting measures, use exact key lookup
+                        const measureDef = getMeasureByKey(k);
+                        if (measureDef && 'unit' in measureDef) {
+                            unit = measureDef.unit;
                         }
+                        // Default to 'count' if not found (no guessing)
                     }
                     
                     const formatted = formatMetricValue(v, unit);

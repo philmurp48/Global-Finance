@@ -1,6 +1,7 @@
 // Data model dictionaries for NLQ engine
 
 import { Dimension, Measure, DerivedMetric } from './types';
+import { normalizeText } from './normalize';
 
 export const DIMENSIONS: Dimension[] = [
     { key: "Quarter", type: "time", synonyms: ["quarter", "q", "period"] },
@@ -100,6 +101,36 @@ export const DERIVED: DerivedMetric[] = [
 ];
 
 /**
+ * Single source of truth: Map of measure key -> Measure (exact match only)
+ * Use this when you already have a metric key and need the measure definition
+ */
+export const MEASURE_BY_KEY = new Map<string, Measure | DerivedMetric>();
+
+// Populate the map
+MEASURES.forEach(measure => {
+    MEASURE_BY_KEY.set(measure.key, measure);
+});
+
+DERIVED.forEach(derived => {
+    // Convert DerivedMetric to Measure-like object for lookup
+    MEASURE_BY_KEY.set(derived.key, {
+        key: derived.key,
+        unit: 'percent', // Derived metrics are ratios, displayed as percentages
+        aggregation: 'weighted_ratio',
+        numerator: derived.numerator,
+        denominator: derived.denominator
+    } as Measure);
+});
+
+/**
+ * Get measure by exact key match (for code paths that already have a metric key)
+ * Returns null if key not found - NO fuzzy matching, NO substring matching
+ */
+export function getMeasureByKey(key: string): Measure | DerivedMetric | null {
+    return MEASURE_BY_KEY.get(key) || null;
+}
+
+/**
  * Find dimension by key or synonym
  */
 export function findDimension(query: string): Dimension | null {
@@ -125,34 +156,47 @@ export function findDimension(query: string): Dimension | null {
 }
 
 /**
- * Find measure by key or synonym
+ * Find measure by query text (for NL parsing only)
+ * STRICT matching: exact key match OR synonym match (query includes synonym)
+ * NO substring matching on keys, NO reverse matching (synonym.includes(query))
+ * This prevents "margin" from matching "MarginPct" or "Margin_$mm" by substring
  */
 export function findMeasure(query: string): Measure | DerivedMetric | null {
     const queryLower = normalizeText(query);
     
-    // Check measures
+    // First: exact key match (normalized)
     for (const measure of MEASURES) {
-        // Match by key (case insensitive, handle $mm and _pct)
         const keyLower = normalizeText(measure.key);
-        if (keyLower.includes(queryLower) || queryLower.includes(keyLower)) {
+        if (keyLower === queryLower) {
             return measure;
         }
-        
-        // Match by synonym
+    }
+    
+    // Second: synonym match (query includes synonym, NOT reverse)
+    for (const measure of MEASURES) {
         if (measure.synonyms) {
             for (const synonym of measure.synonyms) {
-                if (queryLower.includes(normalizeText(synonym)) || normalizeText(synonym).includes(queryLower)) {
+                const synonymLower = normalizeText(synonym);
+                // Only match if query includes the synonym (not reverse)
+                if (queryLower.includes(synonymLower)) {
                     return measure;
                 }
             }
         }
     }
     
-    // Check derived metrics
+    // Third: derived metrics exact match
     for (const derived of DERIVED) {
         const keyLower = normalizeText(derived.key);
-        if (queryLower.includes(keyLower) || keyLower.includes(queryLower)) {
-            return derived;
+        if (keyLower === queryLower) {
+            // Convert to Measure-like object
+            return {
+                key: derived.key,
+                unit: 'percent',
+                aggregation: 'weighted_ratio',
+                numerator: derived.numerator,
+                denominator: derived.denominator
+            } as Measure;
         }
     }
     
@@ -167,10 +211,5 @@ export function getDimensionDisplayField(dim: Dimension): string {
         return dim.displayKey;
     }
     return dim.key;
-}
-
-// Simple normalize helper (will be moved to normalize.ts)
-function normalizeText(text: string): string {
-    return text.toLowerCase().replace(/\$mm/g, '').replace(/_pct/g, '').replace(/%/g, '').replace(/_/g, '').replace(/\s/g, '');
 }
 

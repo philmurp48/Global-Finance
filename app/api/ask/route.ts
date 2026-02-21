@@ -6,7 +6,7 @@ import { executeQuery } from '@/lib/nlq/executor';
 import { buildNarrationPrompt } from '@/lib/nlq/narrator';
 import { DatasetMetadata } from '@/lib/nlq/types';
 import { formatMetricValue, getMetricLabel } from '@/lib/nlq/format';
-import { DatasetMetadata } from '@/lib/nlq/types';
+import { getMeasureByKey } from '@/lib/nlq/dictionary';
 
 // Rate limiting (in-memory for dev)
 interface RateLimitEntry {

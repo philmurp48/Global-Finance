@@ -5,6 +5,7 @@ import { planQuery } from './planner';
 import { executeQuery } from './executor';
 import { buildNarrationPrompt } from './narrator';
 import { DatasetMetadata } from './types';
+import { formatMetricValue } from './format';
 
 // Mock data for testing
 const mockRecords = [
@@ -88,16 +89,28 @@ testCases.forEach((testCase, idx) => {
                 if (metricValue !== null && metricValue !== undefined) {
                     console.log('Raw metric value:', metricValue);
                     
-                    // Verify value range
+                    // Verify value range and formatting
                     if (actualUnit === 'percent') {
                         if (metricValue >= 0 && metricValue <= 1) {
                             console.log('✅ Percent value in [0,1] range: CORRECT');
-                            console.log('Formatted value:', `${(metricValue * 100).toFixed(2)}%`);
+                            const formatted = formatMetricValue(metricValue, 'percent');
+                            console.log('Formatted value:', formatted);
+                            if (formatted.includes('%') && !formatted.includes('$')) {
+                                console.log('✅ Formatting: CORRECT (has %, no $)');
+                            } else {
+                                console.log('❌ Formatting: WRONG (should have %, no $)');
+                            }
                         } else {
                             console.log(`❌ Percent value NOT in [0,1] range: WRONG (got ${metricValue})`);
                         }
                     } else if (actualUnit === 'usd_mm') {
-                        console.log('Formatted value:', `$${metricValue.toFixed(2)}M`);
+                        const formatted = formatMetricValue(metricValue, 'usd_mm');
+                        console.log('Formatted value:', formatted);
+                        if (formatted.includes('$') && !formatted.includes('%')) {
+                            console.log('✅ Formatting: CORRECT (has $, no %)');
+                        } else {
+                            console.log('❌ Formatting: WRONG (should have $, no %)');
+                        }
                         if (metricValue > 0 && metricValue < 1000) {
                             console.log('✅ Dollar value reasonable: CORRECT');
                         }

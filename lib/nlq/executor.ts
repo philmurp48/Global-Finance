@@ -1,7 +1,7 @@
 // Executor: deterministic aggregation execution
 
 import { QueryPlan, AggregatedRow, ExecutionResult, DatasetMetadata } from './types';
-import { MEASURES, DERIVED, findMeasure } from './dictionary';
+import { MEASURES, DERIVED, getMeasureByKey } from './dictionary';
 import { formatMetricValue, getMetricLabel } from './format';
 
 const MIN_REVENUE_THRESHOLD = 1 * 1000000; // 1 $mm
@@ -117,7 +117,8 @@ export function executeQuery(
             const bVal = b.measures[plan.metric] || 0;
             
             // For ratios, apply minRevenue threshold
-            const measure = findMeasure(plan.metric);
+            // Use exact key lookup (NOT findMeasure which is for NL parsing)
+            const measure = getMeasureByKey(plan.metric);
             if (measure && (measure.aggregation === 'weighted_ratio' || (measure as any).aggregation === 'ratio')) {
                 const aRevenue = a.measures['TotalRevenue_$mm'] || 0;
                 const bRevenue = b.measures['TotalRevenue_$mm'] || 0;
@@ -148,8 +149,8 @@ export function executeQuery(
     // Build aggregation definition
     const aggDef = buildAggregationDefinition(plan, aggregatedRows.length);
 
-    // Get measure definition
-    const measureDef = findMeasure(plan.metric);
+    // Get measure definition by exact key (NOT findMeasure which is for NL parsing)
+    const measureDef = getMeasureByKey(plan.metric);
 
     // Build answer text
     const answerText = buildAnswerText(aggregatedRows, plan, measureDef);
@@ -173,7 +174,8 @@ export function executeQuery(
  */
 function aggregateMeasures(records: any[], metricKey: string): Record<string, number> {
     const aggregated: Record<string, number> = {};
-    const measure = findMeasure(metricKey);
+    // Use exact key lookup (NOT findMeasure which is for NL parsing)
+    const measure = getMeasureByKey(metricKey);
 
     if (!measure) {
         return aggregated;
