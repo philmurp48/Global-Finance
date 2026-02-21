@@ -66,12 +66,42 @@ npm install
 cp .env.example .env.local
 ```
 
-Edit `.env.local` and add your OpenAI API key:
+Edit `.env.local` and add your API keys:
+
+**Required for AI-powered search:**
+```
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+
+**Required for data storage (choose one):**
+
+For **Vercel Blob** (recommended for Vercel deployments):
+```
+BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+```
+
+For **Upstash Redis**:
+```
+KV_REST_API_URL=your_upstash_redis_url
+KV_REST_API_TOKEN=your_upstash_redis_token
+```
+
+For **Vercel KV**:
+```
+KV_REST_API_URL=your_vercel_kv_url
+KV_REST_API_TOKEN=your_vercel_kv_token
+```
+
+**Note:** If none of the above are configured, the app will use in-memory storage (DEV ONLY - data is lost on server restart).
+
+**Optional (for other features):**
 ```
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+Get your OpenAI API key from [OpenAI Platform](https://platform.openai.com/api-keys)
 
 4. Run the development server:
 ```bash
@@ -128,17 +158,79 @@ The platform expects Excel files with the following sheets:
 - Comprehensive P&L impact analysis
 
 ### AI-Powered Search
-- Natural language query processing using OpenAI GPT
+- Natural language query processing using Google Gemini AI
 - Intelligent analysis of Excel data to answer complex business questions
 - Handles queries like "What Cost Center has the best Margin %", comparisons, trends, and more
-- Falls back to local keyword matching if OpenAI API is not configured
+- Deterministic aggregation for common finance queries (revenue, expense, margin, margin%)
+- Rate limiting and response caching for optimal performance
+- Graceful error handling for quota/rate limit scenarios
 - Available in both the Executive Summary page and header search bar
+- Requires `GEMINI_API_KEY` environment variable to be set
 
 ### Error Handling
 - Comprehensive error handling throughout the application
 - Graceful fallbacks to default data when Excel data is unavailable
 - Detailed error logging for debugging
-- Fallback to local analysis if OpenAI API is unavailable
+- Graceful handling of Gemini API quota/rate limit errors with user-friendly messages
+
+## AI-Powered Search Setup
+
+### Local Development
+
+1. Get your Google Gemini API key:
+   - Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
+   - Sign in with your Google account
+   - Click "Create API Key"
+   - Copy the generated API key
+
+2. Add to `.env.local`:
+   ```
+   GEMINI_API_KEY=your_gemini_api_key_here
+   ```
+   
+   **Note:** For local development, the app will use in-memory storage. Uploaded datasets will be lost on server restart. For persistent storage, configure one of the storage options in the environment variables section above.
+
+3. Restart the development server:
+   ```bash
+   npm run dev
+   ```
+
+4. Upload your Excel data:
+   - Navigate to the Data Upload page
+   - Upload your Excel file
+   - The uploadId will be stored in localStorage automatically
+
+5. Test the search functionality:
+   - Use the search bar in the header or on the Executive Summary page
+   - Try queries like:
+     - "What is our total revenue in 2024Q1?"
+     - "Which cost center has the best margin?"
+     - "Show me the margin percentage for the latest quarter"
+     - "Compare revenue and expenses by geography"
+
+### Vercel Deployment
+
+1. Go to your Vercel project settings
+2. Navigate to "Environment Variables"
+3. Add a new variable:
+   - **Name**: `GEMINI_API_KEY`
+   - **Value**: Your Gemini API key
+   - **Environment**: Production, Preview, and Development (select all)
+4. Redeploy your application
+
+### Testing
+
+The AI search includes:
+- **Rate limiting**: 10 requests per minute per IP (in-memory for dev)
+- **Response caching**: 5-minute cache to minimize API calls
+- **Deterministic aggregation**: Pre-calculated values for revenue, expense, margin queries
+- **Error handling**: Graceful messages for quota/rate limit errors
+
+To test:
+1. Ensure `GEMINI_API_KEY` is set in `.env.local`
+2. Start the dev server: `npm run dev`
+3. Navigate to any page (except home) and use the header search bar
+4. Submit a query and verify the AI response appears in the modal
 
 ## Development
 

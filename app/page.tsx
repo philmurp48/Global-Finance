@@ -1029,19 +1029,140 @@ export default function HomePage() {
         setShowSearchResults(true);
 
         try {
-            // Use local keyword-based analysis (no OpenAI API calls)
-            const results = generateAIResponse(searchQuery, excelData, excelMetrics);
-            setSearchResults(results);
-        } catch (error) {
-            console.error('Search Error:', error);
-            // Show error message
-            setSearchResults({
-                summary: 'Unable to process search. Please try again.',
-                keyFindings: [],
-                recommendations: ['Please check your query and try again'],
-                dataSource: 'Local Analysis',
-                lastUpdated: 'Now'
+            // Get uploadId from localStorage
+            const uploadId = localStorage.getItem('currentUploadId');
+            
+            // Call the /api/ask endpoint
+            const response = await fetch('/api/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    question: searchQuery,
+                    uploadId: uploadId,
+                    pageContext: 'executive-summary'
+                }),
             });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                
+                // Handle rate limit or quota errors
+                if (response.status === 429 || (response.status === 503 && !errorData.fallback)) {
+                    setSearchResults({
+                        summary: errorData.error || 'AI temporarily unavailable, try later.',
+                        keyFindings: [],
+                        recommendations: [
+                            'Please wait a moment and try again',
+                            'The service may be experiencing high demand'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                // If API is not configured (fallback case), show helpful message
+                if (response.status === 503 && errorData.fallback) {
+                    setSearchResults({
+                        summary: errorData.error || 'AI service is not configured. Please set GEMINI_API_KEY environment variable.',
+                        keyFindings: [],
+                        recommendations: [
+                            'Add GEMINI_API_KEY to your .env.local file',
+                            'Get your API key from https://makersuite.google.com/app/apikey',
+                            'Restart the development server after adding the key'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                // Fallback to local analysis if API is not configured
+                if (response.status === 503 && errorData.fallback) {
+                    const results = generateAIResponse(searchQuery, excelData, excelMetrics);
+                    // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
+                    setSearchResults({
+                        ...results,
+                        keyFindings: Array.isArray(results.keyFindings) ? results.keyFindings : [],
+                        recommendations: Array.isArray(results.recommendations) ? results.recommendations : [],
+                        relatedDrivers: Array.isArray(results.relatedDrivers) ? results.relatedDrivers : [],
+                        visualizations: results.visualizations || {}
+                    });
+                    return;
+                }
+
+                // Handle 500 errors with detailed message
+                if (response.status === 500) {
+                    setSearchResults({
+                        summary: errorData.error || 'An error occurred while processing your request.',
+                        keyFindings: errorData.details ? [
+                            {
+                                title: 'Error Details',
+                                detail: typeof errorData.details === 'string' ? errorData.details : errorData.details.message || 'Check server logs',
+                                confidence: 0
+                            }
+                        ] : [],
+                        recommendations: [
+                            'Check that GEMINI_API_KEY is set correctly in .env.local',
+                            'Verify your API key is valid at https://makersuite.google.com/app/apikey',
+                            'Restart the development server after adding the key',
+                            'Check the server console for detailed error messages'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                throw new Error(errorData.error || 'Failed to process search');
+            }
+
+            const data = await response.json();
+            // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
+            setSearchResults({
+                ...data,
+                keyFindings: Array.isArray(data.keyFindings) ? data.keyFindings : [],
+                recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+                relatedDrivers: Array.isArray(data.relatedDrivers) ? data.relatedDrivers : [],
+                visualizations: data.visualizations || {}
+            });
+        } catch (error: any) {
+            console.error('Search Error:', error);
+            
+            // Fallback to local analysis
+            try {
+                const results = generateAIResponse(searchQuery, excelData, excelMetrics);
+                // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
+                setSearchResults({
+                    ...results,
+                    keyFindings: Array.isArray(results.keyFindings) ? results.keyFindings : [],
+                    recommendations: Array.isArray(results.recommendations) ? results.recommendations : [],
+                    relatedDrivers: Array.isArray(results.relatedDrivers) ? results.relatedDrivers : [],
+                    visualizations: results.visualizations || {}
+                });
+            } catch (fallbackError) {
+                setSearchResults({
+                    summary: error.message || 'Unable to process search. Please try again.',
+                    keyFindings: [],
+                    recommendations: [
+                        'Check your internet connection',
+                        'Try rephrasing your question',
+                        'Ensure the GEMINI_API_KEY is configured'
+                    ],
+                    relatedDrivers: [],
+                    visualizations: {},
+                    dataSource: 'System',
+                    lastUpdated: 'Now'
+                });
+            }
         } finally {
             setIsSearching(false);
         }
@@ -5107,30 +5228,47 @@ export default function HomePage() {
                                         {/* Summary */}
                                         <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-5 border border-blue-200">
                                             <h3 className="font-semibold text-gray-900 mb-2">Executive Summary</h3>
-                                            <p className="text-gray-700">{searchResults.summary}</p>
+                                            {/* Show deterministic answer first if available */}
+                                            {searchResults.deterministicAnswer && (
+                                                <div className="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 rounded">
+                                                    <p className="font-semibold text-blue-900 mb-2">Computed Answer:</p>
+                                                    <p className="text-blue-800">{searchResults.deterministicAnswer}</p>
+                                                </div>
+                                            )}
+                                            {/* Show Gemini narration */}
+                                            {searchResults.summary && (
+                                                <div className="mb-4">
+                                                    <p className="font-semibold text-gray-700 mb-2">AI Analysis:</p>
+                                                    <p className="text-gray-700">{searchResults.summary}</p>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Key Findings */}
-                                        <div>
-                                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
-                                                <Target className="w-5 h-5 mr-2 text-purple-600" />
-                                                Key Findings
-                                            </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                {searchResults.keyFindings.map((finding: any, idx: number) => (
-                                                    <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
-                                                        <div className="flex items-start justify-between mb-2">
-                                                            <h4 className="font-medium text-gray-900 text-sm">{finding.title}</h4>
-                                                            <div className="flex items-center space-x-1">
-                                                                <span className="text-xs text-gray-500">Confidence</span>
-                                                                <span className="text-xs font-bold text-purple-600">{finding.confidence}%</span>
+                                        {searchResults.keyFindings && searchResults.keyFindings.length > 0 && (
+                                            <div>
+                                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
+                                                    <Target className="w-5 h-5 mr-2 text-purple-600" />
+                                                    Key Findings
+                                                </h3>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    {searchResults.keyFindings.map((finding: any, idx: number) => (
+                                                        <div key={idx} className="bg-white border border-gray-200 rounded-lg p-4">
+                                                            <div className="flex items-start justify-between mb-2">
+                                                                <h4 className="font-medium text-gray-900 text-sm">{finding.title}</h4>
+                                                                {finding.confidence && (
+                                                                    <div className="flex items-center space-x-1">
+                                                                        <span className="text-xs text-gray-500">Confidence</span>
+                                                                        <span className="text-xs font-bold text-purple-600">{finding.confidence}%</span>
+                                                                    </div>
+                                                                )}
                                                             </div>
+                                                            <p className="text-sm text-gray-600">{finding.detail}</p>
                                                         </div>
-                                                        <p className="text-sm text-gray-600">{finding.detail}</p>
-                                                    </div>
-                                                ))}
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
+                                        )}
 
                                         {/* Data Visualizations */}
                                         {searchResults.visualizations && (
@@ -5573,54 +5711,62 @@ export default function HomePage() {
                                         )}
 
                                         {/* Related Business Drivers */}
-                                        <div>
-                                            <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
-                                                <Building className="w-5 h-5 mr-2 text-cyan-600" />
-                                                Related Business Drivers
-                                            </h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                {searchResults.relatedDrivers.map((driver: any, idx: number) => (
-                                                    <div key={idx} className="bg-gray-50 rounded-lg p-4">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <h4 className="font-medium text-gray-900">{driver.category}</h4>
-                                                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${driver.impact === 'Critical' ? 'bg-red-100 text-red-700' :
-                                                                driver.impact === 'High' ? 'bg-yellow-100 text-yellow-700' :
-                                                                    'bg-gray-100 text-gray-700'
-                                                                }`}>
-                                                                {driver.impact} Impact
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {driver.drivers.map((d: string, i: number) => (
-                                                                <span key={i} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
-                                                                    {d}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        {/* AI Recommendations */}
-                                        <div>
+                                        {searchResults.relatedDrivers && Array.isArray(searchResults.relatedDrivers) && searchResults.relatedDrivers.length > 0 && (
+                                            <div>
                                                 <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
-                                                    <Brain className="w-5 h-5 mr-2 text-cyan-600" />
-                                                    Recommendations
+                                                    <Building className="w-5 h-5 mr-2 text-cyan-600" />
+                                                    Related Business Drivers
                                                 </h3>
-                                            <div className="bg-gradient-to-br from-cyan-50 to-blue-50 rounded-xl p-5 border border-cyan-200">
-                                                <div className="space-y-3">
-                                                    {searchResults.recommendations.map((rec: string, idx: number) => (
-                                                        <div key={idx} className="flex items-start space-x-3">
-                                                            <div className="w-7 h-7 rounded-full bg-cyan-500 text-white flex items-center justify-center flex-shrink-0 text-sm font-bold">
-                                                                {idx + 1}
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {searchResults.relatedDrivers.map((driver: any, idx: number) => (
+                                                        <div key={idx} className="bg-gray-50 rounded-lg p-4">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <h4 className="font-medium text-gray-900">{driver.category}</h4>
+                                                                {driver.impact && (
+                                                                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${driver.impact === 'Critical' ? 'bg-red-100 text-red-700' :
+                                                                        driver.impact === 'High' ? 'bg-yellow-100 text-yellow-700' :
+                                                                            'bg-gray-100 text-gray-700'
+                                                                        }`}>
+                                                                        {driver.impact} Impact
+                                                                    </span>
+                                                                )}
                                                             </div>
-                                                            <p className="text-sm text-gray-700">{rec}</p>
+                                                            {driver.drivers && Array.isArray(driver.drivers) && driver.drivers.length > 0 && (
+                                                                <div className="flex flex-wrap gap-2">
+                                                                    {driver.drivers.map((d: string, i: number) => (
+                                                                        <span key={i} className="text-xs bg-white px-2 py-1 rounded border border-gray-200">
+                                                                            {d}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
                                             </div>
-                                        </div>
+                                        )}
+
+                                        {/* AI Recommendations */}
+                                        {searchResults.recommendations && searchResults.recommendations.length > 0 && (
+                                            <div>
+                                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center">
+                                                    <Brain className="w-5 h-5 mr-2 text-cyan-600" />
+                                                    Recommendations
+                                                </h3>
+                                                <div className="bg-gradient-to-br from-cyan-50 to-blue-50 rounded-xl p-5 border border-cyan-200">
+                                                    <div className="space-y-3">
+                                                        {searchResults.recommendations.map((rec: string, idx: number) => (
+                                                            <div key={idx} className="flex items-start space-x-3">
+                                                                <div className="w-7 h-7 rounded-full bg-cyan-500 text-white flex items-center justify-center flex-shrink-0 text-sm font-bold">
+                                                                    {idx + 1}
+                                                                </div>
+                                                                <p className="text-sm text-gray-700">{rec}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
 
                                         {/* Data Quality & Transparency */}
                                         {searchResults.dataQuality && (

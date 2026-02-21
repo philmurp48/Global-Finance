@@ -57,36 +57,109 @@ export default function ManagementReportingLayout({
         setShowHeaderSearchResults(true);
 
         try {
-            // Fetch Excel data for context
-            const excelResponse = await fetch('/api/excel-data');
-            const excelDataResponse = await excelResponse.json();
-            const excelData = excelDataResponse.data;
-
-            // Note: Local analysis would require importing the generateAIResponse function
-            // For now, show a message that search is available on the main page
-            setHeaderSearchResults({
-                summary: 'Search functionality is available on the Executive Summary page. Please use the search bar there for detailed analysis.',
-                keyFindings: [
-                    {
-                        title: 'Search Location',
-                        detail: 'Use the Search bar on the Executive Summary (home) page for full analysis capabilities.',
-                        confidence: 100
-                    }
-                ],
-                recommendations: [
-                    'Navigate to the Executive Summary page',
-                    'Use the search bar below "Hi Sarah"',
-                    'Ask questions about your Excel data'
-                ],
-                dataSource: 'Local Analysis',
-                lastUpdated: 'Now'
+            // Get uploadId from localStorage
+            const uploadId = localStorage.getItem('currentUploadId');
+            
+            // Call the /api/ask endpoint
+            const response = await fetch('/api/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    question: headerSearchQuery,
+                    uploadId: uploadId,
+                    pageContext: 'header-search'
+                }),
             });
-        } catch (error) {
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                
+                // Handle rate limit or quota errors
+                if (response.status === 429 || (response.status === 503 && !errorData.fallback)) {
+                    setHeaderSearchResults({
+                        summary: errorData.error || 'AI temporarily unavailable, try later.',
+                        keyFindings: [],
+                        recommendations: [
+                            'Please wait a moment and try again',
+                            'The service may be experiencing high demand'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                // If API is not configured (fallback case), show helpful message
+                if (response.status === 503 && errorData.fallback) {
+                    setHeaderSearchResults({
+                        summary: errorData.error || 'AI service is not configured. Please set GEMINI_API_KEY environment variable.',
+                        keyFindings: [],
+                        recommendations: [
+                            'Add GEMINI_API_KEY to your .env.local file',
+                            'Get your API key from https://makersuite.google.com/app/apikey',
+                            'Restart the development server after adding the key'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                // Handle 500 errors with detailed message
+                if (response.status === 500) {
+                    setHeaderSearchResults({
+                        summary: errorData.error || 'An error occurred while processing your request.',
+                        keyFindings: errorData.details ? [
+                            {
+                                title: 'Error Details',
+                                detail: typeof errorData.details === 'string' ? errorData.details : errorData.details.message || 'Check server logs',
+                                confidence: 0
+                            }
+                        ] : [],
+                        recommendations: [
+                            'Check that GEMINI_API_KEY is set correctly in .env.local',
+                            'Verify your API key is valid at https://makersuite.google.com/app/apikey',
+                            'Restart the development server after adding the key',
+                            'Check the server console for detailed error messages'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    return;
+                }
+
+                throw new Error(errorData.error || 'Failed to process search');
+            }
+
+            const data = await response.json();
+            // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
+            setHeaderSearchResults({
+                ...data,
+                keyFindings: Array.isArray(data.keyFindings) ? data.keyFindings : [],
+                recommendations: Array.isArray(data.recommendations) ? data.recommendations : [],
+                relatedDrivers: Array.isArray(data.relatedDrivers) ? data.relatedDrivers : [],
+                visualizations: data.visualizations || {}
+            });
+        } catch (error: any) {
             console.error('Header Search Error:', error);
             setHeaderSearchResults({
-                summary: 'Unable to process search. Please try again.',
+                summary: error.message || 'Unable to process search. Please try again.',
                 keyFindings: [],
-                recommendations: [],
+                recommendations: [
+                    'Check your internet connection',
+                    'Try rephrasing your question',
+                    'Ensure the GEMINI_API_KEY is configured'
+                ],
+                relatedDrivers: [],
+                visualizations: {},
                 dataSource: 'System',
                 lastUpdated: 'Now'
             });
@@ -97,6 +170,7 @@ export default function ManagementReportingLayout({
 
     const handleHeaderKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
+            e.preventDefault();
             handleHeaderAISearch();
         }
     };
@@ -184,7 +258,7 @@ export default function ManagementReportingLayout({
                                         type="text"
                                         value={headerSearchQuery}
                                         onChange={(e) => setHeaderSearchQuery(e.target.value)}
-                                        onKeyPress={handleHeaderKeyPress}
+                                        onKeyDown={handleHeaderKeyPress}
                                         placeholder="Ask me anything about your business..."
                                         className="w-full pl-12 pr-4 py-2.5 bg-white/10 border border-white/20 rounded-l-full text-sm text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                         style={{ WebkitBackdropFilter: 'none', backdropFilter: 'none' }}

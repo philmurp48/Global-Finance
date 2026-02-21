@@ -65,6 +65,16 @@ export default function DataUploadPage() {
             });
 
             if (response.ok) {
+                const result = await response.json();
+                const uploadId = result.uploadId;
+                
+                // Store uploadId in localStorage
+                if (uploadId) {
+                    localStorage.setItem('currentUploadId', uploadId);
+                    localStorage.setItem('uploadTimestamp', new Date().toISOString());
+                    console.log('Stored uploadId:', uploadId);
+                }
+                
                 setExcelData(data);
                 setUploadStatus('success');
             } else {
