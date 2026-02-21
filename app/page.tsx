@@ -1089,10 +1089,10 @@ export default function HomePage() {
                     // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
                     setSearchResults({
                         ...results,
-                        keyFindings: Array.isArray(results.keyFindings) ? results.keyFindings : [],
-                        recommendations: Array.isArray(results.recommendations) ? results.recommendations : [],
-                        relatedDrivers: Array.isArray(results.relatedDrivers) ? results.relatedDrivers : [],
-                        visualizations: results.visualizations || {}
+                        keyFindings: Array.isArray(results?.keyFindings) ? results.keyFindings : [],
+                        recommendations: Array.isArray(results?.recommendations) ? results.recommendations : [],
+                        relatedDrivers: Array.isArray(results?.relatedDrivers) ? results.relatedDrivers : [],
+                        visualizations: results?.visualizations || {}
                     });
                     return;
                 }
@@ -1143,10 +1143,10 @@ export default function HomePage() {
                 // Ensure keyFindings, recommendations, and relatedDrivers are always arrays
                 setSearchResults({
                     ...results,
-                    keyFindings: Array.isArray(results.keyFindings) ? results.keyFindings : [],
-                    recommendations: Array.isArray(results.recommendations) ? results.recommendations : [],
-                    relatedDrivers: Array.isArray(results.relatedDrivers) ? results.relatedDrivers : [],
-                    visualizations: results.visualizations || {}
+                    keyFindings: Array.isArray(results?.keyFindings) ? results.keyFindings : [],
+                    recommendations: Array.isArray(results?.recommendations) ? results.recommendations : [],
+                    relatedDrivers: Array.isArray(results?.relatedDrivers) ? results.relatedDrivers : [],
+                    visualizations: results?.visualizations || {}
                 });
             } catch (fallbackError) {
                 setSearchResults({

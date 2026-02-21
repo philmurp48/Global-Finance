@@ -55,7 +55,7 @@ export function executeQuery(
             timeWindowUsed = { type: 'quarter', value: latestQuarter };
         }
     } else if (plan.timeWindow.type === 'all') {
-        timeWindowUsed = { type: 'all' };
+        timeWindowUsed = { type: 'all', value: undefined };
     }
 
     // Apply dimension filters
