@@ -27,26 +27,36 @@ const inMemoryStore = new Map<string, StoredDataset>();
 
 // Initialize Redis client
 let redis: Redis | null = null;
+let storageBackend: 'KV_REST_API' | 'UPSTASH_REDIS_REST' | 'in-memory' | null = null;
 
 function getRedis(): Redis | null {
     if (!redis) {
-        // Accept either UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN
-        const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
-        const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+        // Prefer KV_REST_API_* over UPSTASH_REDIS_REST_* for backward compatibility
+        const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+        const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
         
         if (!url || !token) {
             // In dev mode, allow fallback to in-memory storage
             if (process.env.NODE_ENV !== 'production') {
-                console.warn('⚠️  Upstash Redis not configured. Using in-memory storage (DEV ONLY - data will be lost on server restart).');
-                console.warn('   Set UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN for persistent storage.');
+                storageBackend = 'in-memory';
+                console.warn('⚠️  [STORAGE] Upstash Redis not configured. Using in-memory storage (DEV ONLY - data will be lost on server restart).');
+                console.warn('   Set KV_REST_API_URL/TOKEN or UPSTASH_REDIS_REST_URL/TOKEN for persistent storage.');
                 return null;
             } else {
                 // In production, require Redis configuration
                 throw new Error(
-                    'Upstash Redis not configured. Please set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN ' +
-                    '(or KV_REST_API_URL and KV_REST_API_TOKEN) environment variables.'
+                    'Upstash Redis not configured. Please set KV_REST_API_URL and KV_REST_API_TOKEN ' +
+                    '(or UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN) environment variables.'
                 );
             }
+        }
+        
+        // Determine which env var pair is being used
+        storageBackend = process.env.KV_REST_API_URL ? 'KV_REST_API' : 'UPSTASH_REDIS_REST';
+        
+        // DEV-only log: which backend is used
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[STORAGE] Initialized: Using ${storageBackend} backend`);
         }
         
         redis = new Redis({
@@ -75,22 +85,32 @@ export async function saveDataset(
         };
         
         const client = getRedis();
+        const backend = storageBackend || 'in-memory';
+        const key = `dataset:${uploadId}`;
         
         // Use Redis if available, otherwise fall back to in-memory (dev only)
         if (client) {
-            await client.set(`dataset:${uploadId}`, JSON.stringify(dataset));
+            await client.set(key, JSON.stringify(dataset));
+            // DEV-only log
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[STORAGE] SAVE: uploadId=${uploadId}, backend=${backend}, key=${key}, HIT`);
+            }
             return true;
         } else {
             // Dev fallback: in-memory storage
             inMemoryStore.set(uploadId, dataset);
+            // DEV-only log
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[STORAGE] SAVE: uploadId=${uploadId}, backend=in-memory, key=${key}, HIT`);
+            }
             return true;
         }
     } catch (error) {
-        console.error('Error saving dataset:', error);
+        console.error('[STORAGE] Error saving dataset:', error);
         
         // In dev mode, fall back to in-memory storage on error
         if (process.env.NODE_ENV !== 'production') {
-            console.warn('⚠️  Redis save failed, falling back to in-memory storage (DEV ONLY)');
+            console.warn('⚠️  [STORAGE] Redis save failed, falling back to in-memory storage (DEV ONLY)');
             const dataset: StoredDataset = {
                 uploadId,
                 data,
@@ -98,6 +118,8 @@ export async function saveDataset(
                 metadata: metadata || {}
             };
             inMemoryStore.set(uploadId, dataset);
+            // DEV-only log
+            console.log(`[STORAGE] SAVE: uploadId=${uploadId}, backend=in-memory (fallback), key=dataset:${uploadId}, HIT`);
             return true;
         }
         
@@ -111,10 +133,17 @@ export async function saveDataset(
 export async function getDataset(uploadId: string): Promise<StoredDataset | null> {
     try {
         const client = getRedis();
+        const backend = storageBackend || 'in-memory';
+        const key = `dataset:${uploadId}`;
         
         // Use Redis if available, otherwise fall back to in-memory (dev only)
         if (client) {
-            const raw = await client.get<string>(`dataset:${uploadId}`);
+            const raw = await client.get<string>(key);
+            
+            // DEV-only log
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[STORAGE] GET: uploadId=${uploadId}, backend=${backend}, key=${key}, ${raw ? 'HIT' : 'MISS'}`);
+            }
             
             if (!raw) {
                 return null;
@@ -123,15 +152,23 @@ export async function getDataset(uploadId: string): Promise<StoredDataset | null
             return JSON.parse(raw);
         } else {
             // Dev fallback: in-memory storage
-            return inMemoryStore.get(uploadId) || null;
+            const result = inMemoryStore.get(uploadId) || null;
+            // DEV-only log
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`[STORAGE] GET: uploadId=${uploadId}, backend=in-memory, key=${key}, ${result ? 'HIT' : 'MISS'}`);
+            }
+            return result;
         }
     } catch (error) {
-        console.error('Error getting dataset:', error);
+        console.error('[STORAGE] Error getting dataset:', error);
         
         // In dev mode, fall back to in-memory storage on error
         if (process.env.NODE_ENV !== 'production') {
-            console.warn('⚠️  Redis get failed, falling back to in-memory storage (DEV ONLY)');
-            return inMemoryStore.get(uploadId) || null;
+            console.warn('⚠️  [STORAGE] Redis get failed, falling back to in-memory storage (DEV ONLY)');
+            const result = inMemoryStore.get(uploadId) || null;
+            // DEV-only log
+            console.log(`[STORAGE] GET: uploadId=${uploadId}, backend=in-memory (fallback), key=dataset:${uploadId}, ${result ? 'HIT' : 'MISS'}`);
+            return result;
         }
         
         return null;

@@ -5,7 +5,7 @@ import { Upload, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { parseDriverTreeExcel, ExcelDriverTreeData } from '@/lib/excel-parser';
 
 interface ExcelUploadProps {
-    onDataLoaded: (data: ExcelDriverTreeData) => void;
+    onDataLoaded: (data: ExcelDriverTreeData, uploadId: string) => void;
 }
 
 export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
@@ -25,10 +25,39 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
         setFileName(file.name);
 
         try {
+            // Parse Excel file client-side
             const data = await parseDriverTreeExcel(file);
-            onDataLoaded(data);
+            
+            // Upload to server and get uploadId
+            const uploadResponse = await fetch('/api/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    data,
+                    fileName: file.name
+                })
+            });
+
+            if (!uploadResponse.ok) {
+                const errorData = await uploadResponse.json();
+                throw new Error(errorData.error || errorData.details || 'Failed to upload dataset');
+            }
+
+            const { uploadId, metadata } = await uploadResponse.json();
+            
+            if (!uploadId) {
+                throw new Error('Upload succeeded but no uploadId returned');
+            }
+
+            // Store uploadId in localStorage for persistence
+            localStorage.setItem('globalFinanceUploadId', uploadId);
+            
+            // Call callback with data and uploadId
+            onDataLoaded(data, uploadId);
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to parse Excel file');
+            setError(err instanceof Error ? err.message : 'Failed to parse or upload Excel file');
             setFileName(null);
         } finally {
             setIsProcessing(false);

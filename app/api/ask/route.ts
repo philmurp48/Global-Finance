@@ -145,32 +145,17 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check for uploadId
-        if (!uploadId) {
+        // Validate uploadId is provided
+        if (!uploadId || typeof uploadId !== 'string' || !uploadId.trim()) {
             return NextResponse.json(
-                {
-                    summary: 'No dataset uploaded. Please upload your Excel file first using the Data Upload page.',
-                    keyFindings: [
-                        {
-                            title: 'Dataset Required',
-                            detail: 'You need to upload a dataset before asking questions. Go to the Data Upload page and upload your Excel file.',
-                            confidence: 100
-                        }
-                    ],
-                    recommendations: [
-                        'Navigate to the Data Upload page',
-                        'Upload your Excel file with financial data',
-                        'Wait for the upload to complete',
-                        'Then try your search query again'
-                    ],
-                    relatedDrivers: [],
-                    visualizations: {},
-                    dataSource: 'System',
-                    lastUpdated: new Date().toISOString(),
-                    query: question
-                },
-                { status: 200 }
+                { error: 'uploadId required' },
+                { status: 400 }
             );
+        }
+
+        // DEV-only log
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[ASK] uploadId=${uploadId}, question="${question.substring(0, 50)}..."`);
         }
 
         // Check cache
@@ -191,11 +176,20 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Load dataset by uploadId
+        // Load dataset by uploadId - MUST use same storage module
         const dataset = await getDataset(uploadId);
+        
+        // DEV-only log
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[ASK] uploadId=${uploadId}, found=${!!dataset}`);
+        }
+        
         if (!dataset || !dataset.data) {
             return NextResponse.json(
                 {
+                    error: 'DATASET_NOT_FOUND',
+                    uploadId,
+                    message: 'Please upload your Excel file again.',
                     summary: `Dataset with ID ${uploadId} not found. Please upload your Excel file again.`,
                     keyFindings: [
                         {
@@ -215,7 +209,7 @@ export async function POST(request: NextRequest) {
                     lastUpdated: new Date().toISOString(),
                     query: question
                 },
-                { status: 200 }
+                { status: 404 }
             );
         }
 
