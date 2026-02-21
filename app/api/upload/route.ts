@@ -22,18 +22,18 @@ export async function POST(request: NextRequest) {
         // Generate unique uploadId
         const uploadId = generateUploadId();
 
-        // Prepare data for storage (convert Maps to arrays for JSON serialization)
+        // Prepare data for storage (convert Maps to arrays/objects for JSON serialization)
         const storageData = {
             tree: data.tree || [],
             accountingFacts: data.accountingFacts 
-                ? Array.from(data.accountingFacts.entries()) 
+                ? Array.from((data.accountingFacts as Map<string, any>).entries()) 
                 : [],
             factMarginRecords: data.factMarginRecords || [],
             dimensionTables: data.dimensionTables 
                 ? Object.fromEntries(
-                    Array.from(data.dimensionTables.entries()).map(([tableName, records]) => [
+                    Array.from((data.dimensionTables as Map<string, Map<string, any>>).entries()).map(([tableName, records]) => [
                         tableName,
-                        Object.fromEntries(records.entries())
+                        Object.fromEntries((records as Map<string, any>).entries())
                     ])
                 )
                 : {},
