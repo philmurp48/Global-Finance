@@ -114,101 +114,6 @@ function buildDatasetMetadata(dataset: any): DatasetMetadata {
     return metadata;
 }
 
-function buildSmartContext(plan: any, summaries: any, dataset: any, metrics: any): string {
-    const contextParts: string[] = [];
-
-    contextParts.push('=== QUERY ANALYSIS ===');
-    contextParts.push(`Metrics requested: ${plan.metrics.join(', ')}`);
-    if (plan.timeWindow) {
-        contextParts.push(`Time window: ${plan.timeWindow.type}${plan.timeWindow.value ? ` (${plan.timeWindow.value})` : ''}`);
-    }
-    if (plan.dimensions && plan.dimensions.length > 0) {
-        contextParts.push(`Dimensions: ${plan.dimensions.join(', ')}`);
-    }
-    contextParts.push('');
-
-    contextParts.push('=== COMPUTED METRICS ===');
-    Object.entries(summaries.metrics || {}).forEach(([metric, data]: [string, any]) => {
-        if (data.total !== 0 || data.count > 0) {
-            if (metric.includes('Pct') || metric.includes('Percent')) {
-                contextParts.push(`${metric}: ${data.average.toFixed(2)}% (from ${data.count} records)`);
-            } else {
-                contextParts.push(`${metric}: $${(data.total / 1000000).toFixed(2)}M (avg: $${(data.average / 1000000).toFixed(2)}M from ${data.count} records)`);
-            }
-        }
-    });
-    contextParts.push('');
-
-    // Add dimension aggregations if available
-    if (summaries.aggregations && Object.keys(summaries.aggregations).length > 0) {
-        contextParts.push('=== DIMENSION BREAKDOWNS ===');
-        Object.entries(summaries.aggregations).forEach(([dim, aggs]: [string, any]) => {
-            contextParts.push(`\n${dim} Breakdown:`);
-            if (Array.isArray(aggs) && aggs.length > 0) {
-                aggs.forEach((agg: any, idx: number) => {
-                    const metricValues: string[] = [];
-                    Object.entries(agg.metrics || {}).forEach(([m, v]: [string, any]) => {
-                        if (v !== 0 && v !== null && v !== undefined) {
-                            if (m.includes('Pct') || m.includes('Percent') || m === 'marginPct') {
-                                // Calculate margin % if we have revenue and margin
-                                if (m === 'marginPct' && agg.metrics.revenue && agg.metrics.margin) {
-                                    const marginPct = (agg.metrics.margin / agg.metrics.revenue) * 100;
-                                    metricValues.push(`${m}: ${marginPct.toFixed(2)}%`);
-                                } else {
-                                    metricValues.push(`${m}: ${v.toFixed(2)}%`);
-                                }
-                            } else {
-                                metricValues.push(`${m}: $${(v / 1000000).toFixed(2)}M`);
-                            }
-                        }
-                    });
-                    if (metricValues.length > 0) {
-                        contextParts.push(`  ${idx + 1}. ${agg.name || agg.id}: ${metricValues.join(', ')}`);
-                    }
-                });
-            } else {
-                contextParts.push(`  No ${dim} data found`);
-            }
-        });
-        contextParts.push('');
-    }
-
-    // Add schema preview (column names + sample rows)
-    if (dataset?.factMarginRecords && dataset.factMarginRecords.length > 0) {
-        contextParts.push('=== DATA SCHEMA ===');
-        const sampleRecord = dataset.factMarginRecords[0];
-        const columns = Object.keys(sampleRecord);
-        contextParts.push(`Available columns: ${columns.join(', ')}`);
-        contextParts.push(`Total records: ${dataset.factMarginRecords.length}`);
-        
-        // Show sample of 3 records
-        contextParts.push('\nSample records (first 3):');
-        dataset.factMarginRecords.slice(0, 3).forEach((record: any, idx: number) => {
-            const recordStr = Object.entries(record)
-                .filter(([k, v]) => v !== null && v !== undefined && v !== '')
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(', ');
-            contextParts.push(`  Record ${idx + 1}: ${recordStr}`);
-        });
-        contextParts.push('');
-    }
-
-    // Add available quarters
-    if (dataset?.factMarginRecords) {
-        const quarters = new Set<string>();
-        dataset.factMarginRecords.forEach((record: any) => {
-            const quarterKey = Object.keys(record).find(k => k.toLowerCase() === 'quarter');
-            if (quarterKey && record[quarterKey]) {
-                quarters.add(String(record[quarterKey]).trim());
-            }
-        });
-        if (quarters.size > 0) {
-            contextParts.push(`Available quarters: ${Array.from(quarters).sort().join(', ')}`);
-        }
-    }
-
-    return contextParts.join('\n');
-}
 
 export async function POST(request: NextRequest) {
     try {
@@ -417,17 +322,19 @@ export async function POST(request: NextRequest) {
                 .map(([k, v]) => {
                     if (v === null || v === undefined) return null;
                     
-                    // Find unit for this measure key
+                    // Determine unit: use exact key lookup, NO guessing from key name
                     let unit: "usd_mm" | "percent" | "count" = "count";
+                    
+                    // If this is the primary metric, use the measure definition from result
                     if (k === result.plan.metric && result.meta.measureDefinition && 'unit' in result.meta.measureDefinition) {
                         unit = result.meta.measureDefinition.unit;
                     } else {
-                        // Infer from key name as fallback
-                        if (k.includes('_$mm') || k.includes('$mm')) {
-                            unit = 'usd_mm';
-                        } else if (k.includes('_pct') || k.includes('Pct') || k === 'MarginPct') {
-                            unit = 'percent';
+                        // For supporting measures, use exact key lookup
+                        const measureDef = getMeasureByKey(k);
+                        if (measureDef && 'unit' in measureDef) {
+                            unit = measureDef.unit;
                         }
+                        // Default to 'count' if not found (no guessing)
                     }
                     
                     const formatted = formatMetricValue(v, unit);

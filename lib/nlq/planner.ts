@@ -7,6 +7,11 @@ import { normalizeText, extractQuarter, extractYear, extractNumber, extractGroup
 /**
  * Disambiguate "margin" intent explicitly
  * Default meaning of "margin" in finance dashboards is margin % (MarginPct)
+ * 
+ * Rules:
+ * - If question includes "%", "percent", "pct" -> MarginPct
+ * - If question includes "$", "dollar", "amount", "mm" -> Margin_$mm
+ * - Default: MarginPct
  */
 function pickMarginMetric(question: string): "MarginPct" | "Margin_$mm" {
     const q = question.toLowerCase();
@@ -14,19 +19,13 @@ function pickMarginMetric(question: string): "MarginPct" | "Margin_$mm" {
     const wantsPercent =
         q.includes("%") ||
         q.includes("percent") ||
-        q.includes("pct") ||
-        q.includes("margin %") ||
-        q.includes("margin pct");
+        q.includes("pct");
 
     const wantsDollars =
         q.includes("$") ||
         q.includes("dollar") ||
         q.includes("amount") ||
-        q.includes("mm") ||
-        q.includes("margin dollars") ||
-        q.includes("profit dollars") ||
-        q.includes("margin $") ||
-        q.includes("profit $");
+        q.includes("mm");
 
     if (wantsPercent) return "MarginPct";
     if (wantsDollars) return "Margin_$mm";

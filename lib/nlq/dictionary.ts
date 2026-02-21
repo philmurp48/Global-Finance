@@ -103,14 +103,13 @@ export const DERIVED: DerivedMetric[] = [
 /**
  * Single source of truth: Map of measure key -> Measure (exact match only)
  * Use this when you already have a metric key and need the measure definition
+ * STRICT: No fuzzy matching, no substring matching
  */
-export const MEASURE_BY_KEY = new Map<string, Measure | DerivedMetric>();
+export const MEASURE_BY_KEY = new Map<string, Measure | DerivedMetric>(
+    MEASURES.map(m => [m.key, m])
+);
 
-// Populate the map
-MEASURES.forEach(measure => {
-    MEASURE_BY_KEY.set(measure.key, measure);
-});
-
+// Add derived metrics to the map
 DERIVED.forEach(derived => {
     // Convert DerivedMetric to Measure-like object for lookup
     MEASURE_BY_KEY.set(derived.key, {
@@ -127,7 +126,7 @@ DERIVED.forEach(derived => {
  * Returns null if key not found - NO fuzzy matching, NO substring matching
  */
 export function getMeasureByKey(key: string): Measure | DerivedMetric | null {
-    return MEASURE_BY_KEY.get(key) || null;
+    return MEASURE_BY_KEY.get(key) ?? null;
 }
 
 /**

@@ -4,7 +4,8 @@ import { QueryPlan, AggregatedRow, ExecutionResult, DatasetMetadata } from './ty
 import { MEASURES, DERIVED, getMeasureByKey } from './dictionary';
 import { formatMetricValue, getMetricLabel } from './format';
 
-const MIN_REVENUE_THRESHOLD = 1 * 1000000; // 1 $mm
+// Revenue threshold for ratio rankings (values are already in $mm, so use 1)
+const MIN_REVENUE_THRESHOLD = 1; // 1 $mm (data is already in millions)
 
 /**
  * Execute query plan and return aggregated results
