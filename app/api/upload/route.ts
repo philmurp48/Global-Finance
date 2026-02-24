@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveDataset, getDataset, newUploadId, storageDiagnostics } from '@/lib/storage';
+import { saveDataset, getDataset, newUploadId, getStorageDiagnostics, getStorageBackendName } from '@/lib/storage';
 import { ExcelDriverTreeData } from '@/lib/excel-parser';
 
 export const runtime = "nodejs";
@@ -178,8 +178,8 @@ export async function POST(request: NextRequest) {
         }
 
         if (!saveResult.ok) {
-            const diag = storageDiagnostics();
-            console.error('[UPLOAD] Failed to save dataset:', uploadId, 'error:', saveResult.error, 'diagnostics:', diag);
+            const diag = getStorageDiagnostics();
+            console.error('[UPLOAD] Failed to save dataset:', uploadId, 'error:', saveResult.error);
             return NextResponse.json(
                 { 
                     success: false,
@@ -187,7 +187,11 @@ export async function POST(request: NextRequest) {
                     uploadId,
                     uploadedAt,
                     reason: saveResult.error ?? "unknown",
-                    diagnostics: diag
+                    diagnostics: {
+                        backend: saveResult.backend,
+                        hasKVRest: diag.hasKVRest,
+                        hasUpstash: diag.hasUpstash
+                    }
                 },
                 { status: 500 }
             );
@@ -195,45 +199,56 @@ export async function POST(request: NextRequest) {
 
         console.log(`[UPLOAD] saveDataset succeeded uploadId=${uploadId} backend=${saveResult.backend} recordCount=${recordCount}`);
 
-        // CRITICAL: Do readback verification with retry - ensure data is actually retrievable
-        console.log(`[UPLOAD] performing readback verification uploadId=${uploadId}`);
-        const backoffDelays = [50, 150, 300]; // ms - 3 retries
-        let readback: any = null;
-        let lastAttempt = 0;
+        // CRITICAL: Do readback verification - ensure data is actually retrievable
+        const readback = await getDataset(uploadId);
+        const readbackSucceeded = !!readback;
+        const backendName = getStorageBackendName();
+        const diag = getStorageDiagnostics();
         
-        for (let attempt = 0; attempt < backoffDelays.length; attempt++) {
-            if (attempt > 0) {
-                await new Promise(resolve => setTimeout(resolve, backoffDelays[attempt - 1]));
-            }
-            lastAttempt = attempt + 1;
-            readback = await getDataset(uploadId, attempt);
-            if (readback) {
-                console.log(`[UPLOAD] readback verification PASSED uploadId=${uploadId} attempt=${lastAttempt}`);
-                break;
-            }
-            console.warn(`[UPLOAD] readback attempt ${lastAttempt} MISS uploadId=${uploadId}`);
-        }
+        // Minimal server log: uploadId, bytes, backend, readback status
+        console.log(`[UPLOAD] uploadId=${uploadId} bytes=${saveResult.bytes} backend=${backendName} readback=${readbackSucceeded ? 'OK' : 'FAILED'}`);
         
-        // If readback still missing after retries, return 500 (atomic upload requirement)
-        if (!readback) {
-            const diag = storageDiagnostics();
-            console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { 
-                uploadId, 
-                uploadedAt,
-                recordCount,
-                backend: saveResult.backend,
-                attempts: lastAttempt,
-                diagnostics: diag
-            });
-            // Return 500 - upload is NOT successful if we can't read back the data
-            return NextResponse.json({
-                success: false,
-                error: 'POST_SAVE_READBACK_FAILED',
-                uploadId,
-                uploadedAt,
-                diagnostics: diag,
-                message: 'Saved dataset but could not read it back. In production this usually means KV is not configured or not reachable.'
-            }, { status: 500 });
+        // If readback fails, handle differently in prod vs dev
+        if (!readbackSucceeded) {
+            if (process.env.NODE_ENV === "production") {
+                // Production: return 500 - upload is NOT successful
+                console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { 
+                    uploadId, 
+                    uploadedAt,
+                    backend: saveResult.backend
+                });
+                return NextResponse.json({
+                    success: false,
+                    error: 'POST_SAVE_READBACK_FAILED',
+                    uploadId,
+                    uploadedAt,
+                    diagnostics: {
+                        backend: saveResult.backend,
+                        hasKVRest: diag.hasKVRest,
+                        hasUpstash: diag.hasUpstash
+                    }
+                }, { status: 500 });
+            } else {
+                // Non-production: return success with warning
+                console.warn('[UPLOAD] READBACK_MISS - dataset not found after save (dev mode)', { 
+                    uploadId, 
+                    uploadedAt,
+                    backend: saveResult.backend
+                });
+                return NextResponse.json({
+                    success: true,
+                    uploadId,
+                    uploadedAt,
+                    backend: saveResult.backend,
+                    bytes: saveResult.bytes,
+                    warning: 'READBACK_MISS',
+                    diagnostics: {
+                        backend: saveResult.backend,
+                        hasKVRest: diag.hasKVRest,
+                        hasUpstash: diag.hasUpstash
+                    }
+                }, { status: 200 });
+            }
         }
 
         // Only return success after readback verification - ALWAYS include uploadId
@@ -246,13 +261,11 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
 
     } catch (e: any) {
-        const diag = storageDiagnostics();
+        const diag = getStorageDiagnostics();
         console.error('[UPLOAD] failed', { 
             uploadId, 
             uploadedAt,
-            error: String(e?.message || e),
-            stack: e?.stack?.substring(0, 1000),
-            diagnostics: diag
+            error: String(e?.message || e)
         });
         return NextResponse.json(
             { 
@@ -261,7 +274,11 @@ export async function POST(request: NextRequest) {
                 uploadId,
                 uploadedAt,
                 reason: String(e?.message || e),
-                diagnostics: diag
+                diagnostics: {
+                    backend: getStorageBackendName(),
+                    hasKVRest: diag.hasKVRest,
+                    hasUpstash: diag.hasUpstash
+                }
             },
             { status: 500 }
         );

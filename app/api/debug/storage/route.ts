@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { storageDiagnostics } from '@/lib/storage';
+import { getStorageDiagnostics } from '@/lib/storage';
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const diagnostics = storageDiagnostics();
+  const diagnostics = getStorageDiagnostics();
   return NextResponse.json({
     ok: true,
     diagnostics

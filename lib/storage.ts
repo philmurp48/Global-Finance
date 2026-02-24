@@ -55,16 +55,66 @@ function selectBackend(): BackendType {
 }
 
 /**
- * Export diagnostics for debugging storage configuration
+ * Validate Redis/KV configuration
+ * Returns null if valid, error string if invalid
  */
-export function storageDiagnostics() {
+function validateRedisConfig(): string | null {
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) {
+    return "Missing KV_REST_API_URL or KV_REST_API_TOKEN";
+  }
+  
+  if (!KV_REST_API_URL.startsWith("https://")) {
+    return "KV_REST_API_URL must start with https://";
+  }
+  
+  if (KV_REST_API_TOKEN.trim() === "") {
+    return "KV_REST_API_TOKEN must be non-empty";
+  }
+  
+  return null;
+}
+
+/**
+ * Get storage backend name for logging
+ */
+export function getStorageBackendName(): string {
   const backend = selectBackend();
+  if (backend === "redis") return "redis";
+  if (backend === "memory") return "memory";
+  return "misconfigured";
+}
+
+/**
+ * Export diagnostics for debugging storage configuration
+ * Includes safe information (no secrets)
+ */
+export function getStorageDiagnostics() {
+  const backend = selectBackend();
+  const hasKVRest = !!KV_REST_API_URL && !!KV_REST_API_TOKEN;
+  const hasUpstash = hasKVRest && KV_REST_API_URL?.includes("upstash");
+  
+  let urlHost: string | undefined;
+  try {
+    if (KV_REST_API_URL) {
+      const url = new URL(KV_REST_API_URL);
+      urlHost = url.host; // Safe - just the hostname, no secrets
+    }
+  } catch {
+    // Invalid URL, skip urlHost
+  }
+  
   return {
-    nodeEnv: process.env.NODE_ENV,
-    hasKVUrl: !!KV_REST_API_URL,
-    hasKVToken: !!KV_REST_API_TOKEN,
-    backendChosen: backend,
+    backend: backend === "redis" ? "redis" : backend === "memory" ? "memory" : "misconfigured",
+    hasKVRest,
+    hasUpstash,
+    nodeEnv: process.env.NODE_ENV || "unknown",
+    urlHost
   };
+}
+
+// Legacy export for backward compatibility
+export function storageDiagnostics() {
+  return getStorageDiagnostics();
 }
 
 // Log backend selection once per process
@@ -137,30 +187,61 @@ export async function saveDataset(uploadId: string, dataset: any): Promise<SaveR
     return { ok: false, backend: "memory", bytes: 0, error: errorMsg };
   }
 
-  // Redis backend
+  // Redis backend - validate configuration first
   if (backend === "redis") {
-    try {
-      await redisCommand(["SET", key, payload], uploadId);
-      // Immediate verification read (belt + suspenders)
-      const verify = await redisCommand<string>(["GET", key], uploadId);
-      if (!verify) {
-        console.warn("[STORAGE] SAVE redis SET succeeded but immediate GET returned null", { uploadId, key });
+    const validationError = validateRedisConfig();
+      if (validationError) {
+        if (isProd) {
+          const diag = getStorageDiagnostics();
+          console.error("[STORAGE] SAVE failed - invalid Redis config", { uploadId, error: validationError, diagnostics: diag });
+          return { 
+            ok: false, 
+            backend: "redis", 
+            bytes: 0, 
+            error: `PERSIST_FAILED: ${validationError}`
+          };
+        } else {
+          // In dev, fall back to memory
+          console.warn("[STORAGE] SAVE invalid Redis config, falling back to memory", { uploadId, error: validationError });
+        }
+      } else {
+      try {
+        await redisCommand(["SET", key, payload], uploadId);
+        // Immediate verification read (belt + suspenders)
+        const verify = await redisCommand<string>(["GET", key], uploadId);
+        if (!verify) {
+          console.warn("[STORAGE] SAVE redis SET succeeded but immediate GET returned null", { uploadId, key });
+        }
+        console.log("[STORAGE] SAVE ok", { uploadId, key, backend: "redis", bytes, recordCount });
+        return { ok: true, backend: "redis", bytes };
+      } catch (e: any) {
+        setRedisHealthy(false);
+        const errorMsg = e?.message || String(e);
+        // Extract safe error message (no tokens)
+        const safeError = errorMsg.includes("KV REST error") 
+          ? errorMsg 
+          : errorMsg.length > 200 
+          ? errorMsg.substring(0, 200) 
+          : errorMsg;
+        
+        console.error("[STORAGE] SAVE redis failed", { 
+                uploadId,
+          key, 
+          err: safeError
+        });
+        // In production, don't fall back to memory
+        if (isProd) {
+          const diag = getStorageDiagnostics();
+          console.error("[STORAGE] SAVE failed - Redis error", { uploadId, error: safeError, diagnostics: diag });
+          return { 
+            ok: false, 
+            backend: "redis", 
+            bytes, 
+            error: `PERSIST_FAILED: ${safeError}`
+          };
+        }
+        // In dev, fall through to memory
       }
-      console.log("[STORAGE] SAVE ok", { uploadId, key, backend: "redis", bytes, recordCount });
-      return { ok: true, backend: "redis", bytes };
-    } catch (e: any) {
-      setRedisHealthy(false);
-      console.error("[STORAGE] SAVE redis failed", { 
-        uploadId, 
-        key, 
-        err: String(e?.message || e),
-        stack: e?.stack?.substring(0, 500)
-      });
-      // In production, don't fall back to memory
-      if (isProd) {
-        return { ok: false, backend: "redis", bytes, error: String(e?.message || e) };
-      }
-      // In dev, fall through to memory
     }
   }
 
@@ -192,9 +273,9 @@ export async function getDataset(uploadId: string, retryCount = 0): Promise<any 
   if (backend === "misconfigured") {
     const diag = storageDiagnostics();
     console.error("[STORAGE] LOAD failed - misconfigured in production", { uploadId, key, diagnostics: diag });
-    return null;
-  }
-
+                return null;
+            }
+            
   // Redis backend
   if (backend === "redis") {
     try {
@@ -212,12 +293,18 @@ export async function getDataset(uploadId: string, retryCount = 0): Promise<any 
       console.log("[STORAGE] LOAD", { uploadId, key, backend: "redis", hit: false });
       return null;
     } catch (e: any) {
-      console.error("[STORAGE] LOAD redis failed", { 
-        uploadId, 
-        key, 
-        err: String(e?.message || e),
-        stack: e?.stack?.substring(0, 500)
-      });
+      const errorMsg = e?.message || String(e);
+      // Extract safe error message (no tokens)
+      const safeError = errorMsg.includes("KV REST error") 
+        ? errorMsg 
+        : errorMsg.length > 200 
+        ? errorMsg.substring(0, 200) 
+        : errorMsg;
+      
+      // Log one safe line in non-production
+      if (!isProd) {
+        console.error("[STORAGE] LOAD redis failed", { uploadId, key, err: safeError });
+      }
       // In production, don't fall back to memory
       if (isProd) return null;
       // In dev, try memory fallback
@@ -245,7 +332,7 @@ function safeParse(data: string | any): any {
       return JSON.parse(data);
     } catch (e) {
       console.error("[STORAGE] JSON parse failed", { err: String(e) });
-      return null;
+        return null;
     }
   }
   // Already an object

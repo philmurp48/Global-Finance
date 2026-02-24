@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getDataset, storageDiagnostics } from '@/lib/storage';
+import { getDataset, getStorageDiagnostics } from '@/lib/storage';
 
 export const runtime = "nodejs";
 import { planQuery } from '@/lib/nlq/planner';
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
         const { question, uploadId, pageContext, selectedQuarter } = body;
 
         // Log diagnostics at the top of POST handler
-        const diag = storageDiagnostics();
+        const diag = getStorageDiagnostics();
         console.log("[ASK] diagnostics", diag, { uploadId, pageContext });
 
         if (!question || typeof question !== 'string' || !question.trim()) {
@@ -198,21 +198,26 @@ export async function POST(request: NextRequest) {
             uploadId, 
             found: datasetFound,
             hasData,
-            backend: diag.backendChosen
+            backend: diag.backend
         });
         
         if (!dataset) {
             console.error('[ASK] DATASET_NOT_FOUND', { uploadId, diagnostics: diag });
-            const backendMsg = diag.backendChosen === 'misconfigured' 
+            const backendMsg = diag.backend === 'misconfigured' 
                 ? 'KV is not configured in production. Set KV_REST_API_URL and KV_REST_API_TOKEN environment variables.'
-                : diag.backendChosen === 'memory'
+                : diag.backend === 'memory'
                 ? 'Using memory backend (dev only). In production, this indicates KV is not configured.'
                 : 'Dataset not found. Please upload your Excel file again.';
             return NextResponse.json(
                 {
                     error: 'DATASET_NOT_FOUND',
                     uploadId,
-                    diagnostics: diag,
+                    diagnostics: {
+                        backend: diag.backend,
+                        hasKVRest: diag.hasKVRest,
+                        hasUpstash: diag.hasUpstash,
+                        urlHost: diag.urlHost
+                    },
                     message: backendMsg
                 },
                 { status: 404 }

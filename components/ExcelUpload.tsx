@@ -62,12 +62,29 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
                 return; // STOP - do not proceed
             }
 
+            // NEVER store uploadId if warning is "READBACK_MISS" (server should prevent this in prod, but be defensive)
+            if (result.warning === 'READBACK_MISS') {
+                const errorMsg = result.error 
+                    ? `Upload failed: ${result.error}${result.reason ? ` - ${result.reason}` : ''}`
+                    : 'Upload failed: dataset could not be verified after save';
+                setError(errorMsg);
+                setFileName(null);
+                return; // STOP - do not proceed with READBACK_MISS warning
+            }
+
             const uploadId = result.uploadId;
             
-            // Store authoritative uploadId using shared helper
-            setCurrentUploadId(uploadId);
-            // Also keep legacy key for backward compatibility during migration
-            localStorage.setItem('currentUploadId', uploadId);
+            // Only store uploadId if we have valid success response (no warning, non-empty uploadId)
+            if (uploadId && uploadId.trim() !== '') {
+                // Store authoritative uploadId using shared helper
+                setCurrentUploadId(uploadId);
+                // Also keep legacy key for backward compatibility during migration
+                localStorage.setItem('currentUploadId', uploadId);
+            } else {
+                setError('Upload response missing valid uploadId');
+                setFileName(null);
+                return; // STOP - do not proceed without valid uploadId
+            }
             
             // Call callback with data and uploadId
             onDataLoaded(data, uploadId);
