@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
         // Validate uploadId is provided
         if (!uploadId || typeof uploadId !== 'string' || !uploadId.trim()) {
             return NextResponse.json(
-                { error: 'uploadId required' },
+                { error: 'MISSING_UPLOAD_ID' },
                 { status: 400 }
             );
         }
@@ -189,13 +189,22 @@ export async function POST(request: NextRequest) {
             console.log(`[ASK] uploadId=${uploadId}, found=${!!dataset}`);
         }
         
-        if (!dataset || !dataset.data) {
+        if (!dataset) {
+            return NextResponse.json(
+                {
+                    error: 'DATASET_NOT_FOUND',
+                    uploadId
+                },
+                { status: 404 }
+            );
+        }
+
+        if (!dataset.data) {
             return NextResponse.json(
                 {
                     error: 'DATASET_NOT_FOUND',
                     uploadId,
-                    message: 'Please upload your Excel file again.',
-                    summary: `Dataset with ID ${uploadId} not found. Please upload your Excel file again.`,
+                    message: 'Dataset exists but has no data. Please upload your Excel file again.',
                     keyFindings: [
                         {
                             title: 'Dataset Not Found',

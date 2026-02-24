@@ -15,7 +15,12 @@ export default function DataUploadPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const response = await fetch('/api/excel-data');
+                const uploadId = localStorage.getItem('currentUploadId');
+                if (!uploadId) {
+                    console.warn('[DATA-UPLOAD] No currentUploadId found in localStorage');
+                    return;
+                }
+                const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);
                 if (response.ok) {
                     const result = await response.json();
                     if (result.data) {
@@ -39,51 +44,15 @@ export default function DataUploadPage() {
         loadData();
     }, []);
 
-    const handleDataLoaded = async (data: ExcelDriverTreeData) => {
-        setUploadStatus('uploading');
+    const handleDataLoaded = async (data: ExcelDriverTreeData, uploadId: string) => {
+        // ExcelUpload component already handles upload via /api/upload
+        // Just update local state
+        setUploadStatus('success');
         setErrorMessage(null);
-
-        try {
-            // Save to server
-            const dataToSave = {
-                tree: data.tree,
-                accountingFacts: Array.from(data.accountingFacts.entries()),
-                factMarginRecords: data.factMarginRecords || [],
-                dimensionTables: Object.fromEntries(
-                    Array.from(data.dimensionTables.entries()).map(([k, v]) => [
-                        k,
-                        Object.fromEntries(v.entries())
-                    ])
-                ),
-                namingConventionRecords: data.namingConventionRecords || []
-            };
-
-            const response = await fetch('/api/excel-data', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: dataToSave })
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                const uploadId = result.uploadId;
-                
-                // Store uploadId in localStorage
-                if (uploadId) {
-                    localStorage.setItem('currentUploadId', uploadId);
-                    localStorage.setItem('uploadTimestamp', new Date().toISOString());
-                    console.log('Stored uploadId:', uploadId);
-                }
-                
-                setExcelData(data);
-                setUploadStatus('success');
-            } else {
-                throw new Error('Failed to save data to server');
-            }
-        } catch (error) {
-            setUploadStatus('error');
-            setErrorMessage(error instanceof Error ? error.message : 'Failed to upload data');
-        }
+        setExcelData(data);
+        
+        // uploadId is already set in localStorage by ExcelUpload component
+        console.log('[DATA-UPLOAD] Data loaded with uploadId:', uploadId);
     };
 
     const getDataSummary = () => {

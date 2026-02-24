@@ -49,17 +49,25 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
                 throw new Error(errorMessage);
             }
 
-            const { uploadId, metadata } = await uploadResponse.json();
+            const result = await uploadResponse.json();
             
-            if (!uploadId) {
-                throw new Error('Upload succeeded but no uploadId returned');
+            // REQUIRE success:true and uploadId - do not proceed if either is missing
+            if (result.success !== true || !result.uploadId) {
+                throw new Error(result.error 
+                    ? `Upload failed: ${result.error}${result.reason ? ` - ${result.reason}` : ''}`
+                    : 'Upload response missing success flag or uploadId');
             }
 
-            // Store uploadId in localStorage for persistence
-            localStorage.setItem('globalFinanceUploadId', uploadId);
+            const uploadId = result.uploadId;
+            
+            // Only set localStorage if upload succeeded with valid uploadId
+            localStorage.setItem('currentUploadId', uploadId);
             
             // Call callback with data and uploadId
             onDataLoaded(data, uploadId);
+            
+            // Show success message
+            setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to parse or upload Excel file');
             setFileName(null);

@@ -241,7 +241,12 @@ export default function ScenarioModelingPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const response = await fetch('/api/excel-data');
+                const uploadId = localStorage.getItem('currentUploadId');
+                if (!uploadId) {
+                    console.warn('[SCENARIO] No currentUploadId found in localStorage');
+                    return;
+                }
+                const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);
                 if (response.ok) {
                     const result = await response.json();
                     if (result.data) {
