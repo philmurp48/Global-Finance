@@ -1026,16 +1026,51 @@ export default function ScenarioModelingPage() {
             }
 
             // Level 3: Headcount FTE
+            // Headcount FTE only affects Total Compensation, which then proportionally affects Total Expenses and Margin
             const headcountFTEChange = leverValues.HeadcountFTE || 0;
-            if (headcountFTEChange !== 0 && impactPercentages.HeadcountFTE) {
-                Object.keys(impactPercentages.HeadcountFTE).forEach(field => {
-                    const impactPercent = impactPercentages.HeadcountFTE[field] || 0;
-                    if (impactPercent !== 0) {
-                        const baseValue = baseData[field] || 0;
-                        const impact = baseValue * (headcountFTEChange / 100) * impactPercent;
-                        data[period][field] = (data[period][field] || baseValue) + impact;
+            if (headcountFTEChange !== 0) {
+                // Find Total Compensation field (could be TotalCompensation_$mm or Exp_CompBenefits_$mm)
+                let totalCompensationField: string | null = null;
+                const possibleFields = ['TotalCompensation_$mm', 'Exp_CompBenefits_$mm', 'TotalCompensation', 'Exp_CompBenefits'];
+                
+                for (const field of possibleFields) {
+                    if (baseData[field] !== undefined && baseData[field] !== null) {
+                        totalCompensationField = field;
+                        break;
                     }
-                });
+                }
+                
+                // Also check in pnlLineItems for the field name
+                if (!totalCompensationField) {
+                    const compItem = pnlLineItems.find(item => 
+                        item.fieldName && (
+                            item.fieldName.toLowerCase().includes('totalcompensation') ||
+                            item.fieldName.toLowerCase().includes('exp_compbenefits')
+                        )
+                    );
+                    if (compItem && compItem.fieldName) {
+                        totalCompensationField = compItem.fieldName;
+                    }
+                }
+                
+                if (totalCompensationField && baseData[totalCompensationField] !== undefined) {
+                    const baseTotalCompensation = baseData[totalCompensationField] || 0;
+                    
+                    // Apply Headcount FTE change directly to Total Compensation (1:1 relationship)
+                    // If Headcount FTE increases by X%, Total Compensation increases by X%
+                    const totalCompensationChange = baseTotalCompensation * (headcountFTEChange / 100);
+                    const newTotalCompensation = baseTotalCompensation + totalCompensationChange;
+                    data[period][totalCompensationField] = newTotalCompensation;
+                    
+                    // Calculate the proportional change percentage in Total Compensation
+                    const totalCompensationChangePercent = baseTotalCompensation !== 0 
+                        ? (totalCompensationChange / baseTotalCompensation) * 100 
+                        : headcountFTEChange;
+                    
+                    // Apply the same proportional change to ALL expenses (proportionally adjust Total Expenses)
+                    // Store this for later application in the totals recalculation
+                    data[period]['_headcountExpenseChangePercent'] = totalCompensationChangePercent;
+                }
             }
 
             // Level 4: Acquisition Cost Per Client
@@ -1075,18 +1110,55 @@ export default function ScenarioModelingPage() {
                 }
             });
             
-            // Sum impacts to expense detail items
+            // Sum impacts to expense detail items (excluding Total Compensation which is handled separately)
             let inExpenseSection = false;
+            let totalCompensationFieldName: string | null = null;
+            
+            // Find Total Compensation field name to exclude it from detail sum
+            const possibleCompFields = ['TotalCompensation_$mm', 'Exp_CompBenefits_$mm', 'TotalCompensation', 'Exp_CompBenefits'];
+            for (const field of possibleCompFields) {
+                if (baseData[field] !== undefined && baseData[field] !== null) {
+                    totalCompensationFieldName = field;
+                    break;
+                }
+            }
+            if (!totalCompensationFieldName) {
+                const compItem = pnlLineItems.find(item => 
+                    item.fieldName && (
+                        item.fieldName.toLowerCase().includes('totalcompensation') ||
+                        item.fieldName.toLowerCase().includes('exp_compbenefits')
+                    )
+                );
+                if (compItem && compItem.fieldName) {
+                    totalCompensationFieldName = compItem.fieldName;
+                }
+            }
+            
             pnlLineItems.forEach(item => {
                 if (item.label === 'Expenses' && item.fieldName === 'TotalExpense_$mm') {
                     inExpenseSection = true;
                 } else if (inExpenseSection && item.fieldName && !item.isTotal && (item.indent === 1 || item.indent === 2)) {
+                    // Exclude Total Compensation from detail sum - it's handled via proportional adjustment
+                    if (totalCompensationFieldName && item.fieldName.toLowerCase() === totalCompensationFieldName.toLowerCase()) {
+                        return; // Skip Total Compensation
+                    }
                     // This is an expense detail item - calculate impact
                     const baseValue = baseData[item.fieldName] || 0;
                     const newValue = data[period][item.fieldName] || 0;
                     expenseImpact += (newValue - baseValue);
                 }
             });
+            
+            // Apply Headcount FTE proportional impact on Total Expenses
+            // If Headcount FTE changed Total Compensation by X%, proportionally adjust Total Expenses by X%
+            if (data[period]['_headcountExpenseChangePercent'] !== undefined) {
+                const expenseChangePercent = data[period]['_headcountExpenseChangePercent'];
+                // Apply proportional change to Total Expenses (this includes the Total Compensation change)
+                const proportionalExpenseChange = baseTotalExpense * (expenseChangePercent / 100);
+                expenseImpact += proportionalExpenseChange;
+                // Clean up the temporary field
+                delete data[period]['_headcountExpenseChangePercent'];
+            }
             
             // Apply impacts to totals
             data[period]['TotalRevenue_$mm'] = baseTotalRevenue + revenueImpact;
