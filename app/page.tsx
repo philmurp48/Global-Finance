@@ -4681,12 +4681,15 @@ export default function HomePage() {
                                                     <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
                                                         <Icon className={`w-4 h-4 ${insight.iconColor}`} />
                                                     </div>
-                                                    <div className="flex items-center space-x-1 flex-shrink-0">
-                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
-                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
-                                                            {insight.value}
-                                                        </span>
+                                                    <div className="flex flex-col items-end flex-shrink-0">
+                                                        <div className="flex items-center space-x-1">
+                                                            {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                            {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                            <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                                {insight.value}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-0.5">{insight.insight}</p>
                                                     </div>
                                                 </div>
 
@@ -4745,9 +4748,6 @@ export default function HomePage() {
                                                         </svg>
                                                     )}
                                                 </div>
-
-                                                {/* Insight text */}
-                                                <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                             </div>
                                         </motion.div>
                                     );
@@ -4781,12 +4781,15 @@ export default function HomePage() {
                                                     <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
                                                         <Icon className={`w-4 h-4 ${insight.iconColor}`} />
                                                     </div>
-                                                    <div className="flex items-center space-x-1 flex-shrink-0">
-                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
-                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
-                                                            {insight.value}
-                                                        </span>
+                                                    <div className="flex flex-col items-end flex-shrink-0">
+                                                        <div className="flex items-center space-x-1">
+                                                            {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                            {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                            <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                                {insight.value}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-0.5">{insight.insight}</p>
                                                     </div>
                                                 </div>
 
@@ -4845,9 +4848,6 @@ export default function HomePage() {
                                                         </svg>
                                                     )}
                                                 </div>
-
-                                                {/* Insight text */}
-                                                <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                             </div>
                                         </motion.div>
                                     );
@@ -4884,12 +4884,15 @@ export default function HomePage() {
                                                     <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
                                                         <Icon className={`w-4 h-4 ${insight.iconColor}`} />
                                                     </div>
-                                                    <div className="flex items-center space-x-1 flex-shrink-0">
-                                                        {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
-                                                        {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-                                                        <span className={`text-xs font-bold ${insight.valueColor}`}>
-                                                            {insight.value}
-                                                        </span>
+                                                    <div className="flex flex-col items-end flex-shrink-0">
+                                                        <div className="flex items-center space-x-1">
+                                                            {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                            {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                            <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                                {insight.value}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 mt-0.5">{insight.insight}</p>
                                                     </div>
                                                 </div>
 
@@ -4949,8 +4952,6 @@ export default function HomePage() {
                                                         )}
                                                     </div>
 
-                                                    {/* Insight text */}
-                                                    <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                                 </div>
                                             </motion.div>
                                         );
@@ -4984,12 +4985,15 @@ export default function HomePage() {
                                                         <div className={`p-2 rounded-lg ${insight.bgColor} flex-shrink-0`}>
                                                             <Icon className={`w-4 h-4 ${insight.iconColor}`} />
                                                         </div>
-                                                        <div className="flex items-center space-x-1 flex-shrink-0">
-                                                            {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
-                                                            {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
-                                                            <span className={`text-xs font-bold ${insight.valueColor}`}>
-                                                                {insight.value}
-                                                            </span>
+                                                        <div className="flex flex-col items-end flex-shrink-0">
+                                                            <div className="flex items-center space-x-1">
+                                                                {insight.trend === 'up' && <TrendingUp className="w-3 h-3 text-green-500" />}
+                                                                {insight.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-500" />}
+                                                                <span className={`text-xs font-bold ${insight.valueColor}`}>
+                                                                    {insight.value}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-xs text-gray-500 mt-0.5">{insight.insight}</p>
                                                         </div>
                                                     </div>
 
@@ -5049,8 +5053,6 @@ export default function HomePage() {
                                                         )}
                                                     </div>
 
-                                                    {/* Insight text */}
-                                                    <p className="text-xs text-gray-600 mt-auto">{insight.insight}</p>
                                                 </div>
                                             </motion.div>
                                         );
