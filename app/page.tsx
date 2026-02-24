@@ -25,6 +25,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useMemo } from 'react';
 import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames } from '@/lib/excel-parser';
 import { extractExecutiveSummaryMetrics } from '@/lib/excel-metrics';
+import { getCurrentUploadId } from '@/lib/uploadId';
 
 const personalizedInsights = [
     {
@@ -433,9 +434,10 @@ export default function HomePage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const uploadId = localStorage.getItem('currentUploadId');
+                // Use shared helper to get uploadId
+                const uploadId = getCurrentUploadId();
                 if (!uploadId) {
-                    console.warn('[PAGE] No currentUploadId found in localStorage');
+                    console.warn('[PAGE] No uploadId found in localStorage');
                     return;
                 }
                 const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);
@@ -1043,8 +1045,27 @@ export default function HomePage() {
         setShowSearchResults(true);
 
         try {
-            // Get uploadId from localStorage
-            const uploadId = localStorage.getItem('currentUploadId');
+            // Get uploadId using shared helper (reads from authoritative key)
+            const uploadId = getCurrentUploadId();
+            
+            // If no uploadId, show friendly message and stop
+            if (!uploadId || uploadId.trim() === '') {
+                setSearchResults({
+                    summary: 'Please upload your Excel file first to enable search.',
+                    keyFindings: [{
+                        title: 'No Data Uploaded',
+                        detail: 'Upload your Excel file from the Data Upload page to start asking questions.',
+                        confidence: 100
+                    }],
+                    recommendations: [
+                        'Go to the Data Upload page',
+                        'Upload your Excel file',
+                        'Try your search query again'
+                    ]
+                });
+                setIsSearching(false);
+                return;
+            }
             
             // Call the /api/ask endpoint
             const response = await fetch('/api/ask', {
@@ -1061,6 +1082,29 @@ export default function HomePage() {
 
             if (!response.ok) {
                 const errorData = await response.json();
+                
+                // Handle DATASET_NOT_FOUND with friendly message and re-upload CTA
+                if (response.status === 404 && errorData.error === 'DATASET_NOT_FOUND') {
+                    setSearchResults({
+                        summary: 'Dataset not found. Please upload your Excel file again.',
+                        keyFindings: [{
+                            title: 'Dataset Not Found',
+                            detail: `The dataset with ID ${errorData.uploadId || 'unknown'} could not be found. This may happen if the server was restarted or the dataset expired.`,
+                            confidence: 100
+                        }],
+                        recommendations: [
+                            'Go to the Data Upload page',
+                            'Re-upload your Excel file',
+                            'Try your search query again'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    setIsSearching(false);
+                    return;
+                }
                 
                 // Handle rate limit or quota errors
                 if (response.status === 429 || (response.status === 503 && !errorData.fallback)) {

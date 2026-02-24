@@ -15,6 +15,7 @@ import {
     ChevronRight
 } from 'lucide-react';
 import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames, FactMarginRecord, NamingConventionRecord } from '@/lib/excel-parser';
+import { getCurrentUploadId } from '@/lib/uploadId';
 
 interface PnLLineItem {
     label: string;
@@ -45,9 +46,10 @@ function OperationalPerformanceContent() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const uploadId = localStorage.getItem('currentUploadId');
+                // Use shared helper to get uploadId
+                const uploadId = getCurrentUploadId();
                 if (!uploadId) {
-                    console.warn('[OPERATIONAL] No currentUploadId found in localStorage');
+                    console.warn('[OPERATIONAL] No uploadId found in localStorage');
                     return;
                 }
                 const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);

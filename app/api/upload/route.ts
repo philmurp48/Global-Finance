@@ -99,9 +99,9 @@ export async function POST(request: NextRequest) {
             try {
                 // Try Map first
                 if (dimTables instanceof Map || (typeof dimTables === 'object' && dimTables.entries && typeof dimTables.entries === 'function')) {
-                    const entries = Array.from(dimTables.entries());
+                    const entries = Array.from(dimTables.entries()) as [string, any][];
                     return Object.fromEntries(
-                        entries.map(([tableName, records]: [string, any]) => {
+                        entries.map(([tableName, records]) => {
                             // Convert inner Map/object
                             const recordEntries = toEntries(records);
                             return [tableName, Object.fromEntries(recordEntries)];
@@ -191,26 +191,47 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        console.log(`[UPLOAD] saveDataset succeeded uploadId=${uploadId} backend=${saveResult.backend}`);
+        console.log(`[UPLOAD] saveDataset succeeded uploadId=${uploadId} backend=${saveResult.backend} recordCount=${recordCount}`);
 
-        // CRITICAL: Do readback verification - ensure data is actually retrievable
+        // CRITICAL: Do readback verification with retry - ensure data is actually retrievable
         console.log(`[UPLOAD] performing readback verification uploadId=${uploadId}`);
-        const readback = await getDataset(uploadId);
+        const backoffDelays = [50, 150, 300]; // ms - 3 retries
+        let readback: any = null;
+        let lastAttempt = 0;
         
-        if (!readback) {
-            console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { uploadId });
-            return NextResponse.json(
-                { 
-                    success: false,
-                    error: 'POST_SAVE_READBACK_FAILED',
-                    uploadId,
-                    uploadedAt
-                },
-                { status: 500 }
-            );
+        for (let attempt = 0; attempt < backoffDelays.length; attempt++) {
+            if (attempt > 0) {
+                await new Promise(resolve => setTimeout(resolve, backoffDelays[attempt - 1]));
+            }
+            lastAttempt = attempt + 1;
+            readback = await getDataset(uploadId, attempt);
+            if (readback) {
+                console.log(`[UPLOAD] readback verification PASSED uploadId=${uploadId} attempt=${lastAttempt}`);
+                break;
+            }
+            console.warn(`[UPLOAD] readback attempt ${lastAttempt} MISS uploadId=${uploadId}`);
         }
-
-        console.log(`[UPLOAD] readback verification PASSED uploadId=${uploadId}`);
+        
+        // If readback still missing after retries, log warning but still return success
+        // (write may be eventually readable, and UI can proceed)
+        if (!readback) {
+            console.warn('[UPLOAD] READBACK_MISS after retries - dataset not found after save', { 
+                uploadId, 
+                uploadedAt,
+                recordCount,
+                backend: saveResult.backend,
+                attempts: lastAttempt
+            });
+            // Return success with warning (both dev and prod)
+            return NextResponse.json({
+                success: true,
+                uploadId,
+                uploadedAt,
+                backend: saveResult.backend,
+                bytes: saveResult.bytes,
+                warning: 'READBACK_MISS'
+            }, { status: 200 });
+        }
 
         // Only return success after readback verification - ALWAYS include uploadId
         return NextResponse.json({
@@ -222,7 +243,12 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
 
     } catch (e: any) {
-        console.error('[UPLOAD] failed', e);
+        console.error('[UPLOAD] failed', { 
+            uploadId, 
+            uploadedAt,
+            error: String(e?.message || e),
+            stack: e?.stack?.substring(0, 1000)
+        });
         return NextResponse.json(
             { 
                 success: false,

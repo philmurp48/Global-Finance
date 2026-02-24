@@ -13,6 +13,7 @@ import {
     BarChart3
 } from 'lucide-react';
 import { ExcelDriverTreeData, FactMarginRecord, DriverTreeNode, PeriodData, NamingConventionRecord } from '@/lib/excel-parser';
+import { getCurrentUploadId } from '@/lib/uploadId';
 
 interface ScenarioLever {
     id: string;
@@ -241,9 +242,10 @@ export default function ScenarioModelingPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const uploadId = localStorage.getItem('currentUploadId');
+                // Use shared helper to get uploadId
+                const uploadId = getCurrentUploadId();
                 if (!uploadId) {
-                    console.warn('[SCENARIO] No currentUploadId found in localStorage');
+                    console.warn('[SCENARIO] No uploadId found in localStorage');
                     return;
                 }
                 const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);

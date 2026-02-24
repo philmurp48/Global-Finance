@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getDataset } from '@/lib/storage';
+
+export const runtime = "nodejs";
 import { planQuery } from '@/lib/nlq/planner';
 import { executeQuery } from '@/lib/nlq/executor';
 import { buildNarrationPrompt } from '@/lib/nlq/narrator';
@@ -152,16 +154,27 @@ export async function POST(request: NextRequest) {
 
         // Validate uploadId is provided
         if (!uploadId || typeof uploadId !== 'string' || !uploadId.trim()) {
+            console.error('[ASK] MISSING_UPLOAD_ID', { 
+                hasUploadId: !!uploadId, 
+                uploadIdType: typeof uploadId,
+                questionPreview: question.substring(0, 50)
+            });
             return NextResponse.json(
-                { error: 'MISSING_UPLOAD_ID' },
+                { error: 'MISSING_UPLOAD_ID', message: 'uploadId is required in request body' },
                 { status: 400 }
             );
         }
 
-        // DEV-only log
-        if (process.env.NODE_ENV !== 'production') {
-            console.log(`[ASK] uploadId=${uploadId}, question="${question.substring(0, 50)}..."`);
-        }
+        // Defensive logging for diagnosis
+        const hasKVUrl = !!process.env.KV_REST_API_URL;
+        const hasKVToken = !!process.env.KV_REST_API_TOKEN;
+        console.log(`[ASK] request received`, { 
+            uploadId, 
+            questionPreview: question.substring(0, 50),
+            hasKVUrl,
+            hasKVToken,
+            pageContext
+        });
 
         // Check cache
         const cachedResponse = getCachedResponse(question, uploadId);
@@ -183,17 +196,24 @@ export async function POST(request: NextRequest) {
 
         // Load dataset by uploadId - MUST use same storage module
         const dataset = await getDataset(uploadId);
+        const datasetFound = !!dataset;
+        const hasData = !!dataset?.data;
         
-        // DEV-only log
-        if (process.env.NODE_ENV !== 'production') {
-            console.log(`[ASK] uploadId=${uploadId}, found=${!!dataset}`);
-        }
+        // Defensive logging
+        console.log(`[ASK] dataset lookup`, { 
+            uploadId, 
+            found: datasetFound,
+            hasData,
+            backend: datasetFound ? 'redis-or-memory' : 'none'
+        });
         
         if (!dataset) {
+            console.error('[ASK] DATASET_NOT_FOUND', { uploadId, hasKVUrl, hasKVToken });
             return NextResponse.json(
                 {
                     error: 'DATASET_NOT_FOUND',
-                    uploadId
+                    uploadId,
+                    message: 'Dataset not found. Please upload your Excel file again.'
                 },
                 { status: 404 }
             );

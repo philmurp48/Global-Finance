@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Upload, CheckCircle2, AlertCircle, FileSpreadsheet, Database } from 'lucide-react';
 import ExcelUpload from '@/components/ExcelUpload';
 import { ExcelDriverTreeData } from '@/lib/excel-parser';
+import { getCurrentUploadId } from '@/lib/uploadId';
 
 export default function DataUploadPage() {
     const [excelData, setExcelData] = useState<ExcelDriverTreeData | null>(null);
@@ -15,9 +16,10 @@ export default function DataUploadPage() {
     useEffect(() => {
         const loadData = async () => {
             try {
-                const uploadId = localStorage.getItem('currentUploadId');
+                // Use shared helper to get uploadId
+                const uploadId = getCurrentUploadId();
                 if (!uploadId) {
-                    console.warn('[DATA-UPLOAD] No currentUploadId found in localStorage');
+                    console.warn('[DATA-UPLOAD] No uploadId found in localStorage');
                     return;
                 }
                 const response = await fetch(`/api/excel-data?uploadId=${uploadId}`);

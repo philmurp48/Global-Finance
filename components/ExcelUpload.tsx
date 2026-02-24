@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Upload, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { parseDriverTreeExcel, ExcelDriverTreeData } from '@/lib/excel-parser';
+import { setCurrentUploadId } from '@/lib/uploadId';
 
 interface ExcelUploadProps {
     onDataLoaded: (data: ExcelDriverTreeData, uploadId: string) => void;
@@ -52,15 +53,20 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
             const result = await uploadResponse.json();
             
             // REQUIRE success:true and uploadId - do not proceed if either is missing
-            if (result.success !== true || !result.uploadId) {
-                throw new Error(result.error 
+            if (result.success !== true || !result.uploadId || result.uploadId.trim() === '') {
+                const errorMsg = result.error 
                     ? `Upload failed: ${result.error}${result.reason ? ` - ${result.reason}` : ''}`
-                    : 'Upload response missing success flag or uploadId');
+                    : 'Upload response missing success flag or uploadId';
+                setError(errorMsg);
+                setFileName(null);
+                return; // STOP - do not proceed
             }
 
             const uploadId = result.uploadId;
             
-            // Only set localStorage if upload succeeded with valid uploadId
+            // Store authoritative uploadId using shared helper
+            setCurrentUploadId(uploadId);
+            // Also keep legacy key for backward compatibility during migration
             localStorage.setItem('currentUploadId', uploadId);
             
             // Call callback with data and uploadId

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveDataset, getDataset, generateUploadId } from '@/lib/storage';
-import { getExcelData, saveExcelData } from '@/lib/db'; // Keep for backward compatibility
+import { getDataset } from '@/lib/storage';
+
+export const runtime = "nodejs";
 
 // GET - require uploadId (no legacy format)
 export async function GET(request: NextRequest) {
@@ -9,14 +10,31 @@ export async function GET(request: NextRequest) {
         const uploadId = searchParams.get('uploadId');
 
         if (!uploadId) {
+            console.error('[EXCEL-DATA] MISSING_UPLOAD_ID', { url: request.url });
             return NextResponse.json(
                 { error: 'MISSING_UPLOAD_ID', message: 'uploadId query parameter is required' },
                 { status: 400 }
             );
         }
 
+        // Defensive logging
+        const hasKVUrl = !!process.env.KV_REST_API_URL;
+        const hasKVToken = !!process.env.KV_REST_API_TOKEN;
+        console.log('[EXCEL-DATA] GET request', { uploadId, hasKVUrl, hasKVToken });
+
         const dataset = await getDataset(uploadId);
+        const datasetFound = !!dataset;
+        const hasData = !!dataset?.data;
+        
+        console.log('[EXCEL-DATA] dataset lookup', { 
+            uploadId, 
+            found: datasetFound,
+            hasData,
+            backend: datasetFound ? 'redis-or-memory' : 'none'
+        });
+
         if (!dataset) {
+            console.error('[EXCEL-DATA] DATASET_NOT_FOUND', { uploadId, hasKVUrl, hasKVToken });
             return NextResponse.json(
                 { error: 'DATASET_NOT_FOUND', uploadId },
                 { status: 404 }

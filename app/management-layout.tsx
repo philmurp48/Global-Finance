@@ -21,6 +21,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { getCurrentUploadId } from '@/lib/uploadId';
 
 export default function ManagementReportingLayout({
     children,
@@ -57,8 +58,31 @@ export default function ManagementReportingLayout({
         setShowHeaderSearchResults(true);
 
         try {
-            // Get uploadId from localStorage
-            const uploadId = localStorage.getItem('currentUploadId');
+            // Get uploadId using shared helper (reads from authoritative key)
+            const uploadId = getCurrentUploadId();
+            
+            // If no uploadId, show friendly message and stop
+            if (!uploadId || uploadId.trim() === '') {
+                setHeaderSearchResults({
+                    summary: 'Please upload your Excel file first to enable search.',
+                    keyFindings: [{
+                        title: 'No Data Uploaded',
+                        detail: 'Upload your Excel file from the Data Upload page to start asking questions.',
+                        confidence: 100
+                    }],
+                    recommendations: [
+                        'Go to the Data Upload page',
+                        'Upload your Excel file',
+                        'Try your search query again'
+                    ],
+                    relatedDrivers: [],
+                    visualizations: {},
+                    dataSource: 'System',
+                    lastUpdated: 'Now'
+                });
+                setIsHeaderSearching(false);
+                return;
+            }
             
             // Call the /api/ask endpoint
             const response = await fetch('/api/ask', {
@@ -75,6 +99,29 @@ export default function ManagementReportingLayout({
 
             if (!response.ok) {
                 const errorData = await response.json();
+                
+                // Handle DATASET_NOT_FOUND with friendly message and re-upload CTA
+                if (response.status === 404 && errorData.error === 'DATASET_NOT_FOUND') {
+                    setHeaderSearchResults({
+                        summary: 'Dataset not found. Please upload your Excel file again.',
+                        keyFindings: [{
+                            title: 'Dataset Not Found',
+                            detail: `The dataset with ID ${errorData.uploadId || 'unknown'} could not be found. This may happen if the server was restarted or the dataset expired.`,
+                            confidence: 100
+                        }],
+                        recommendations: [
+                            'Go to the Data Upload page',
+                            'Re-upload your Excel file',
+                            'Try your search query again'
+                        ],
+                        relatedDrivers: [],
+                        visualizations: {},
+                        dataSource: 'System',
+                        lastUpdated: 'Now'
+                    });
+                    setIsHeaderSearching(false);
+                    return;
+                }
                 
                 // Handle rate limit or quota errors
                 if (response.status === 429 || (response.status === 503 && !errorData.fallback)) {
