@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveDataset, getDataset, newUploadId } from '@/lib/storage';
+import { saveDataset, getDataset, newUploadId, storageDiagnostics } from '@/lib/storage';
 import { ExcelDriverTreeData } from '@/lib/excel-parser';
 
 export const runtime = "nodejs";
@@ -178,14 +178,16 @@ export async function POST(request: NextRequest) {
         }
 
         if (!saveResult.ok) {
-            console.error('[UPLOAD] Failed to save dataset:', uploadId, 'error:', saveResult.error);
+            const diag = storageDiagnostics();
+            console.error('[UPLOAD] Failed to save dataset:', uploadId, 'error:', saveResult.error, 'diagnostics:', diag);
             return NextResponse.json(
                 { 
                     success: false,
                     error: 'PERSIST_FAILED',
                     uploadId,
                     uploadedAt,
-                    reason: saveResult.error ?? "unknown"
+                    reason: saveResult.error ?? "unknown",
+                    diagnostics: diag
                 },
                 { status: 500 }
             );
@@ -212,25 +214,26 @@ export async function POST(request: NextRequest) {
             console.warn(`[UPLOAD] readback attempt ${lastAttempt} MISS uploadId=${uploadId}`);
         }
         
-        // If readback still missing after retries, log warning but still return success
-        // (write may be eventually readable, and UI can proceed)
+        // If readback still missing after retries, return 500 (atomic upload requirement)
         if (!readback) {
-            console.warn('[UPLOAD] READBACK_MISS after retries - dataset not found after save', { 
+            const diag = storageDiagnostics();
+            console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { 
                 uploadId, 
                 uploadedAt,
                 recordCount,
                 backend: saveResult.backend,
-                attempts: lastAttempt
+                attempts: lastAttempt,
+                diagnostics: diag
             });
-            // Return success with warning (both dev and prod)
+            // Return 500 - upload is NOT successful if we can't read back the data
             return NextResponse.json({
-                success: true,
+                success: false,
+                error: 'POST_SAVE_READBACK_FAILED',
                 uploadId,
                 uploadedAt,
-                backend: saveResult.backend,
-                bytes: saveResult.bytes,
-                warning: 'READBACK_MISS'
-            }, { status: 200 });
+                diagnostics: diag,
+                message: 'Saved dataset but could not read it back. In production this usually means KV is not configured or not reachable.'
+            }, { status: 500 });
         }
 
         // Only return success after readback verification - ALWAYS include uploadId
@@ -243,11 +246,13 @@ export async function POST(request: NextRequest) {
         }, { status: 200 });
 
     } catch (e: any) {
+        const diag = storageDiagnostics();
         console.error('[UPLOAD] failed', { 
             uploadId, 
             uploadedAt,
             error: String(e?.message || e),
-            stack: e?.stack?.substring(0, 1000)
+            stack: e?.stack?.substring(0, 1000),
+            diagnostics: diag
         });
         return NextResponse.json(
             { 
@@ -255,7 +260,8 @@ export async function POST(request: NextRequest) {
                 error: 'UPLOAD_FAILED',
                 uploadId,
                 uploadedAt,
-                reason: String(e?.message || e)
+                reason: String(e?.message || e),
+                diagnostics: diag
             },
             { status: 500 }
         );

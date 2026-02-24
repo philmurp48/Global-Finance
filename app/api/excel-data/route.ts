@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDataset } from '@/lib/storage';
+import { getDataset, storageDiagnostics } from '@/lib/storage';
 
 export const runtime = "nodejs";
 
@@ -10,17 +10,16 @@ export async function GET(request: NextRequest) {
         const uploadId = searchParams.get('uploadId');
 
         if (!uploadId) {
-            console.error('[EXCEL-DATA] MISSING_UPLOAD_ID', { url: request.url });
+            const diag = storageDiagnostics();
+            console.error('[EXCEL-DATA] MISSING_UPLOAD_ID', { url: request.url, diagnostics: diag });
             return NextResponse.json(
-                { error: 'MISSING_UPLOAD_ID', message: 'uploadId query parameter is required' },
+                { error: 'MISSING_UPLOAD_ID', message: 'uploadId query parameter is required', diagnostics: diag },
                 { status: 400 }
             );
         }
 
-        // Defensive logging
-        const hasKVUrl = !!process.env.KV_REST_API_URL;
-        const hasKVToken = !!process.env.KV_REST_API_TOKEN;
-        console.log('[EXCEL-DATA] GET request', { uploadId, hasKVUrl, hasKVToken });
+        const diag = storageDiagnostics();
+        console.log('[EXCEL-DATA] GET request', { uploadId, diagnostics: diag });
 
         const dataset = await getDataset(uploadId);
         const datasetFound = !!dataset;
@@ -30,13 +29,18 @@ export async function GET(request: NextRequest) {
             uploadId, 
             found: datasetFound,
             hasData,
-            backend: datasetFound ? 'redis-or-memory' : 'none'
+            backend: diag.backendChosen
         });
 
         if (!dataset) {
-            console.error('[EXCEL-DATA] DATASET_NOT_FOUND', { uploadId, hasKVUrl, hasKVToken });
+            console.error('[EXCEL-DATA] DATASET_NOT_FOUND', { uploadId, diagnostics: diag });
             return NextResponse.json(
-                { error: 'DATASET_NOT_FOUND', uploadId },
+                { 
+                    error: 'DATASET_NOT_FOUND', 
+                    uploadId,
+                    diagnostics: diag,
+                    message: 'Dataset not found for uploadId. If this is production, confirm KV env vars are set and upload route returned success with backend=redis.'
+                },
                 { status: 404 }
             );
         }

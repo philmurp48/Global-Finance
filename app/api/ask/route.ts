@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getDataset } from '@/lib/storage';
+import { getDataset, storageDiagnostics } from '@/lib/storage';
 
 export const runtime = "nodejs";
 import { planQuery } from '@/lib/nlq/planner';
@@ -145,6 +145,10 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { question, uploadId, pageContext, selectedQuarter } = body;
 
+        // Log diagnostics at the top of POST handler
+        const diag = storageDiagnostics();
+        console.log("[ASK] diagnostics", diag, { uploadId, pageContext });
+
         if (!question || typeof question !== 'string' || !question.trim()) {
             return NextResponse.json(
                 { error: 'Question is required' },
@@ -157,24 +161,14 @@ export async function POST(request: NextRequest) {
             console.error('[ASK] MISSING_UPLOAD_ID', { 
                 hasUploadId: !!uploadId, 
                 uploadIdType: typeof uploadId,
-                questionPreview: question.substring(0, 50)
+                questionPreview: question.substring(0, 50),
+                diagnostics: diag
             });
             return NextResponse.json(
-                { error: 'MISSING_UPLOAD_ID', message: 'uploadId is required in request body' },
+                { error: 'MISSING_UPLOAD_ID', message: 'uploadId is required in request body', diagnostics: diag },
                 { status: 400 }
             );
         }
-
-        // Defensive logging for diagnosis
-        const hasKVUrl = !!process.env.KV_REST_API_URL;
-        const hasKVToken = !!process.env.KV_REST_API_TOKEN;
-        console.log(`[ASK] request received`, { 
-            uploadId, 
-            questionPreview: question.substring(0, 50),
-            hasKVUrl,
-            hasKVToken,
-            pageContext
-        });
 
         // Check cache
         const cachedResponse = getCachedResponse(question, uploadId);
@@ -204,16 +198,22 @@ export async function POST(request: NextRequest) {
             uploadId, 
             found: datasetFound,
             hasData,
-            backend: datasetFound ? 'redis-or-memory' : 'none'
+            backend: diag.backendChosen
         });
         
         if (!dataset) {
-            console.error('[ASK] DATASET_NOT_FOUND', { uploadId, hasKVUrl, hasKVToken });
+            console.error('[ASK] DATASET_NOT_FOUND', { uploadId, diagnostics: diag });
+            const backendMsg = diag.backendChosen === 'misconfigured' 
+                ? 'KV is not configured in production. Set KV_REST_API_URL and KV_REST_API_TOKEN environment variables.'
+                : diag.backendChosen === 'memory'
+                ? 'Using memory backend (dev only). In production, this indicates KV is not configured.'
+                : 'Dataset not found. Please upload your Excel file again.';
             return NextResponse.json(
                 {
                     error: 'DATASET_NOT_FOUND',
                     uploadId,
-                    message: 'Dataset not found. Please upload your Excel file again.'
+                    diagnostics: diag,
+                    message: backendMsg
                 },
                 { status: 404 }
             );
