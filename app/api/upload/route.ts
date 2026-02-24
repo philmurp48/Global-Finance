@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         // Save dataset - MUST succeed before returning uploadId
         console.log(`[UPLOAD] attempt saveDataset uploadId=${uploadId}`);
         
-        let saveResult: { ok: boolean; backend: "redis" | "memory"; bytes: number; error?: string };
+        let saveResult: { ok: boolean; backend: "vercel-kv"; bytes: number; error?: string };
         
         try {
             saveResult = await saveDataset(uploadId, dataset);
@@ -208,47 +208,24 @@ export async function POST(request: NextRequest) {
         // Minimal server log: uploadId, bytes, backend, readback status
         console.log(`[UPLOAD] uploadId=${uploadId} bytes=${saveResult.bytes} backend=${backendName} readback=${readbackSucceeded ? 'OK' : 'FAILED'}`);
         
-        // If readback fails, handle differently in prod vs dev
+        // If readback fails, return 500 (atomic upload requirement)
         if (!readbackSucceeded) {
-            if (process.env.NODE_ENV === "production") {
-                // Production: return 500 - upload is NOT successful
-                console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { 
-                    uploadId, 
-                    uploadedAt,
-                    backend: saveResult.backend
-                });
-                return NextResponse.json({
-                    success: false,
-                    error: 'POST_SAVE_READBACK_FAILED',
-                    uploadId,
-                    uploadedAt,
-                    diagnostics: {
-                        backend: saveResult.backend,
-                        hasKVRest: diag.hasKVRest,
-                        hasUpstash: diag.hasUpstash
-                    }
-                }, { status: 500 });
-            } else {
-                // Non-production: return success with warning
-                console.warn('[UPLOAD] READBACK_MISS - dataset not found after save (dev mode)', { 
-                    uploadId, 
-                    uploadedAt,
-                    backend: saveResult.backend
-                });
-                return NextResponse.json({
-                    success: true,
-                    uploadId,
-                    uploadedAt,
+            console.error('[UPLOAD] POST_SAVE_READBACK_FAILED - dataset not found after save', { 
+                uploadId, 
+                uploadedAt,
+                backend: saveResult.backend
+            });
+            return NextResponse.json({
+                success: false,
+                error: 'POST_SAVE_READBACK_FAILED',
+                uploadId,
+                uploadedAt,
+                diagnostics: {
                     backend: saveResult.backend,
-                    bytes: saveResult.bytes,
-                    warning: 'READBACK_MISS',
-                    diagnostics: {
-                        backend: saveResult.backend,
-                        hasKVRest: diag.hasKVRest,
-                        hasUpstash: diag.hasUpstash
-                    }
-                }, { status: 200 });
-            }
+                    hasKVRest: diag.hasKVRest,
+                    hasUpstash: diag.hasUpstash
+                }
+            }, { status: 500 });
         }
 
         // Only return success after readback verification - ALWAYS include uploadId
