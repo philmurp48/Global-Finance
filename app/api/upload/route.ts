@@ -56,14 +56,31 @@ export async function POST(request: NextRequest) {
         };
 
         // Save dataset - MUST succeed before returning uploadId
-        const saveSuccess = await saveDataset(uploadId, storageData, metadata);
+        let saveSuccess = false;
+        let saveError: any = null;
+        let errorReason: 'STORAGE_NOT_CONFIGURED' | 'REDIS_WRITE_FAILED' | 'PAYLOAD_TOO_LARGE' | 'UNKNOWN' | null = null;
+        
+        try {
+            saveSuccess = await saveDataset(uploadId, storageData, metadata);
+        } catch (err: any) {
+            saveError = err;
+            errorReason = err?.reason || 'UNKNOWN';
+            console.error('[UPLOAD] saveDataset failed', { uploadId }, err);
+        }
 
         if (!saveSuccess) {
-            console.error('[UPLOAD] Failed to save dataset:', uploadId);
+            console.error('[UPLOAD] Failed to save dataset:', uploadId, 'reason:', errorReason);
             return NextResponse.json(
                 { 
                     error: 'Failed to persist dataset',
-                    details: 'Storage operation returned false. Please try again.'
+                    reason: errorReason || 'UNKNOWN',
+                    details: errorReason === 'STORAGE_NOT_CONFIGURED' 
+                        ? 'Storage backend not configured. Please configure Redis/KV storage.'
+                        : errorReason === 'REDIS_WRITE_FAILED'
+                        ? 'Failed to write to storage backend. Please try again.'
+                        : errorReason === 'PAYLOAD_TOO_LARGE'
+                        ? 'Dataset is too large. Please reduce the size of your Excel file.'
+                        : 'Storage operation failed. Please try again.'
                 },
                 { status: 500 }
             );

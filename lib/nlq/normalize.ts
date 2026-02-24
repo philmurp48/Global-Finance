@@ -66,17 +66,44 @@ export function containsAny(text: string, keywords: string[]): boolean {
 }
 
 /**
- * Extract "by X" or "per X" pattern
+ * Extract groupBy dimension from various patterns:
+ * - "by X", "per X", "for each X", "split by X", "break down by X", "group by X"
  */
 export function extractGroupBy(text: string): string | null {
-    const byMatch = text.match(/\bby\s+([a-z\s]+?)(?:\s|$|,)/i);
+    // Pattern 1: "by X" (e.g., "by Geography", "by Region")
+    const byMatch = text.match(/\bby\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
     if (byMatch) {
         return byMatch[1].trim();
     }
     
-    const perMatch = text.match(/\bper\s+([a-z\s]+?)(?:\s|$|,)/i);
+    // Pattern 2: "per X" (e.g., "per Geography", "per Region")
+    const perMatch = text.match(/\bper\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
     if (perMatch) {
         return perMatch[1].trim();
+    }
+    
+    // Pattern 3: "for each X" (e.g., "for each Geography")
+    const forEachMatch = text.match(/\bfor\s+each\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
+    if (forEachMatch) {
+        return forEachMatch[1].trim();
+    }
+    
+    // Pattern 4: "split by X" (e.g., "split by Geography")
+    const splitMatch = text.match(/\bsplit\s+by\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
+    if (splitMatch) {
+        return splitMatch[1].trim();
+    }
+    
+    // Pattern 5: "break down by X" or "breakdown by X" (e.g., "break down by Geography")
+    const breakdownMatch = text.match(/\bbreak\s*(?:down\s+)?by\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
+    if (breakdownMatch) {
+        return breakdownMatch[1].trim();
+    }
+    
+    // Pattern 6: "group by X" (e.g., "group by Geography")
+    const groupMatch = text.match(/\bgroup\s+by\s+([a-z\s]+?)(?:\s|$|,|\.)/i);
+    if (groupMatch) {
+        return groupMatch[1].trim();
     }
     
     return null;

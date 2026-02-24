@@ -1765,7 +1765,7 @@ export default function ScenarioModelingPage() {
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center space-x-2">
                                     <BarChart3 className="w-5 h-5 text-gray-600" />
-                                    <h3 className="text-lg font-semibold text-gray-900">P&L Impact</h3>
+                                    <h3 className="text-lg font-semibold text-gray-900">Financial Results Impact</h3>
                                 </div>
                                 {/* Period Multi-select */}
                                 <div className="flex items-center space-x-2">

@@ -19,36 +19,59 @@ const mockRecords = [
     {
         Quarter: '2025Q3',
         CostCenter: 'Sales',
+        Geography: 'North America',
         TotalRevenue_$mm: 100,
         Margin_$mm: 25,
         MarginPct: 0.25, // 25% stored as decimal
+        AvgAUM_$mm: 500,
+        Headcount_FTE: 50,
     },
     {
         Quarter: '2025Q3',
         CostCenter: 'Marketing',
+        Geography: 'EMEA',
         TotalRevenue_$mm: 80,
         Margin_$mm: 20,
         MarginPct: 0.25, // 25% stored as decimal
+        AvgAUM_$mm: 400,
+        Headcount_FTE: 40,
     },
     {
         Quarter: '2025Q3',
         CostCenter: 'Engineering',
+        Geography: 'APAC',
         TotalRevenue_$mm: 120,
         Margin_$mm: 30,
         MarginPct: 0.25, // 25% stored as decimal
+        AvgAUM_$mm: 600,
+        Headcount_FTE: 60,
+    },
+    {
+        Quarter: '2025Q3',
+        CostCenter: 'Operations',
+        Geography: 'LATAM',
+        TotalRevenue_$mm: 70,
+        Margin_$mm: 15,
+        MarginPct: 0.21, // 21% stored as decimal
+        AvgAUM_$mm: 350,
+        Headcount_FTE: 35,
     },
     {
         Quarter: '2025Q2',
         CostCenter: 'Sales',
+        Geography: 'North America',
         TotalRevenue_$mm: 90,
         Margin_$mm: 18,
         MarginPct: 0.20, // 20% stored as decimal
+        AvgAUM_$mm: 450,
+        Headcount_FTE: 45,
     },
 ];
 
 const mockMetadata: DatasetMetadata = {
     dimensions: {
-        CostCenter: ['Sales', 'Marketing', 'Engineering'],
+        CostCenter: ['Sales', 'Marketing', 'Engineering', 'Operations'],
+        Geography: ['North America', 'EMEA', 'APAC', 'LATAM'],
     },
     quarters: ['2025Q2', '2025Q3'],
     latestQuarter: '2025Q3',
@@ -212,6 +235,115 @@ describe('Regression Tests - Stabilization Pass', () => {
             const value = 123.7;
             const formatted = formatMetricValue(value, 'count');
             expect(formatted).toBe('124'); // Rounded
+        });
+    });
+
+    describe('Test 7: GroupBy parsing - Geography/Region', () => {
+        it('should detect "by Geography" in "provide Average AUM by Geography"', () => {
+            const plan = planQuery('provide Average AUM by Geography', undefined, mockMetadata);
+            
+            expect(plan.metric).toBe('AvgAUM_$mm');
+            expect(plan.groupBy).toContain('Geography');
+            expect(plan.operation).toBe('breakdown'); // Default to breakdown for non-ranking questions
+        });
+
+        it('should return multiple rows for "provide Average AUM by Geography"', () => {
+            const plan = planQuery('provide Average AUM by Geography', undefined, mockMetadata);
+            const result = executeQuery(mockRecords, plan, mockMetadata, false);
+            
+            expect(result.topRows.length).toBeGreaterThan(1);
+            // Should have rows for different geographies
+            const geographies = result.topRows.map(row => row.dimensionValues['Geography']);
+            expect(geographies).toContain('North America');
+            expect(geographies).toContain('EMEA');
+            expect(geographies).toContain('APAC');
+            expect(geographies).toContain('LATAM');
+        });
+
+        it('should detect "by Region" and map to Geography', () => {
+            const plan = planQuery('AUM by Region', undefined, mockMetadata);
+            
+            expect(plan.groupBy).toContain('Geography');
+            expect(plan.metric).toBe('AvgAUM_$mm');
+        });
+    });
+
+    describe('Test 8: Filter detection from dimension values', () => {
+        it('should filter by "North America" in "what is the AUM for North America"', () => {
+            const plan = planQuery('what is the AUM for North America', undefined, mockMetadata);
+            
+            expect(plan.metric).toBe('AvgAUM_$mm');
+            expect(plan.filters['Geography']).toContain('North America');
+            expect(plan.operation).toBe('single'); // Single value query
+        });
+
+        it('should return single AUM value for North America filter', () => {
+            const plan = planQuery('what is the AUM for North America', undefined, mockMetadata);
+            const result = executeQuery(mockRecords, plan, mockMetadata, false);
+            
+            expect(result.topRows.length).toBe(1);
+            const row = result.topRows[0];
+            expect(row.dimensionValues['Geography']).toBe('North America');
+            expect(row.measures['AvgAUM_$mm']).toBe(500); // From mock data
+        });
+
+        it('should filter by "EMEA" in "FTE in EMEA"', () => {
+            const plan = planQuery('FTE in EMEA', undefined, mockMetadata);
+            
+            expect(plan.metric).toBe('Headcount_FTE');
+            expect(plan.filters['Geography']).toContain('EMEA');
+        });
+    });
+
+    describe('Test 9: Ranking with groupBy - no extra metrics', () => {
+        it('should return top region by FTE without injecting MarginPct', () => {
+            const plan = planQuery('which region has the maximum FTE', undefined, mockMetadata);
+            
+            expect(plan.metric).toBe('Headcount_FTE');
+            expect(plan.groupBy).toContain('Geography');
+            expect(plan.operation).toBe('top');
+            
+            const result = executeQuery(mockRecords, plan, mockMetadata, false);
+            
+            expect(result.topRows.length).toBeGreaterThan(0);
+            const topRow = result.topRows[0];
+            
+            // Should only have Headcount_FTE, not MarginPct or other extra metrics
+            expect(topRow.measures['Headcount_FTE']).toBeDefined();
+            expect(topRow.measures['MarginPct']).toBeUndefined();
+            expect(topRow.measures['TotalRevenue_$mm']).toBeUndefined();
+        });
+    });
+
+    describe('Test 10: Extra metrics only for driver analysis', () => {
+        it('should include extra metrics when question includes "driver"', () => {
+            const plan = planQuery('what drives margin', undefined, mockMetadata);
+            plan.metric = 'MarginPct';
+            
+            const result = executeQuery(mockRecords, plan, mockMetadata, true);
+            
+            expect(result.topRows.length).toBeGreaterThan(0);
+            const row = result.topRows[0];
+            
+            // Should include extra metrics for driver analysis
+            expect(row.measures['MarginPct']).toBeDefined();
+            expect(row.measures['TotalRevenue_$mm']).toBeDefined();
+            expect(row.measures['Margin_$mm']).toBeDefined();
+        });
+
+        it('should NOT include extra metrics for simple queries', () => {
+            const plan = planQuery('what is the margin', undefined, mockMetadata);
+            plan.metric = 'MarginPct';
+            
+            const result = executeQuery(mockRecords, plan, mockMetadata, false);
+            
+            expect(result.topRows.length).toBeGreaterThan(0);
+            const row = result.topRows[0];
+            
+            // Should only have MarginPct, not extra metrics
+            expect(row.measures['MarginPct']).toBeDefined();
+            expect(row.measures['TotalRevenue_$mm']).toBeUndefined();
+            expect(row.measures['Margin_$mm']).toBeUndefined();
         });
     });
 });

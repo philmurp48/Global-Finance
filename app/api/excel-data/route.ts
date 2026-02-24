@@ -58,11 +58,25 @@ export async function POST(request: NextRequest) {
         };
         
         // Save using new storage system
-        const success = await saveDataset(uploadId, body.data, metadata);
+        let success = false;
+        let saveError: any = null;
+        let errorReason: 'STORAGE_NOT_CONFIGURED' | 'REDIS_WRITE_FAILED' | 'PAYLOAD_TOO_LARGE' | 'UNKNOWN' | null = null;
+        
+        try {
+            success = await saveDataset(uploadId, body.data, metadata);
+        } catch (err: any) {
+            saveError = err;
+            errorReason = err?.reason || 'UNKNOWN';
+            console.error('[UPLOAD] saveDataset failed', { uploadId }, err);
+        }
         
         if (success) {
             // Also save to legacy storage for backward compatibility
-            await saveExcelData(body.data);
+            try {
+                await saveExcelData(body.data);
+            } catch (legacyError) {
+                console.warn('[UPLOAD] Legacy storage save failed (non-critical):', legacyError);
+            }
             
             return NextResponse.json({ 
                 success: true, 
@@ -71,14 +85,30 @@ export async function POST(request: NextRequest) {
             });
         } else {
             return NextResponse.json(
-                { error: 'Failed to save data' },
+                { 
+                    error: 'Failed to persist dataset',
+                    reason: errorReason || 'UNKNOWN',
+                    details: errorReason === 'STORAGE_NOT_CONFIGURED' 
+                        ? 'Storage backend not configured. Please configure Redis/KV storage.'
+                        : errorReason === 'REDIS_WRITE_FAILED'
+                        ? 'Failed to write to storage backend. Please try again.'
+                        : errorReason === 'PAYLOAD_TOO_LARGE'
+                        ? 'Dataset is too large. Please reduce the size of your Excel file.'
+                        : 'Storage operation failed. Please try again.'
+                },
                 { status: 500 }
             );
         }
-    } catch (error) {
-        console.error('Error saving Excel data:', error);
+    } catch (error: any) {
+        console.error('[UPLOAD] Error saving Excel data:', error);
         return NextResponse.json(
-            { error: 'Failed to save data' },
+            { 
+                error: 'Failed to persist dataset',
+                reason: 'UNKNOWN',
+                details: process.env.NODE_ENV === 'development' 
+                    ? error.message 
+                    : 'An error occurred while saving your data. Please try again.'
+            },
             { status: 500 }
         );
     }

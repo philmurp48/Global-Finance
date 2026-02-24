@@ -1083,8 +1083,8 @@ function OperationalPerformanceContent() {
             <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Profit & Loss Report</h1>
-                        <p className="text-sm text-gray-600 mt-1">Operational performance analysis</p>
+                        <h1 className="text-2xl font-bold text-gray-900">Financial Results</h1>
+                        <p className="text-sm text-gray-600 mt-1">Performance Analysis</p>
                     </div>
                     <div className="flex items-center space-x-3">
                         <button className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 flex items-center space-x-2">

@@ -42,7 +42,11 @@ export default function ExcelUpload({ onDataLoaded }: ExcelUploadProps) {
 
             if (!uploadResponse.ok) {
                 const errorData = await uploadResponse.json();
-                throw new Error(errorData.error || errorData.details || 'Failed to upload dataset');
+                // Show the reason if available, otherwise show error or details
+                const errorMessage = errorData.reason 
+                    ? `${errorData.error || 'Failed to upload dataset'}: ${errorData.reason}${errorData.details ? ` - ${errorData.details}` : ''}`
+                    : errorData.error || errorData.details || 'Failed to upload dataset';
+                throw new Error(errorMessage);
             }
 
             const { uploadId, metadata } = await uploadResponse.json();

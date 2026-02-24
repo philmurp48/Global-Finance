@@ -115,6 +115,11 @@ function buildDatasetMetadata(dataset: any): DatasetMetadata {
 }
 
 
+// GET handler for testing route availability
+export async function GET() {
+    return NextResponse.json({ ok: true, route: "/api/ask" });
+}
+
 export async function POST(request: NextRequest) {
     try {
         // Get client IP for rate limiting
@@ -223,7 +228,12 @@ export async function POST(request: NextRequest) {
         console.log('Query plan:', JSON.stringify(plan, null, 2));
         
         // Execute deterministic aggregation
-        const result = executeQuery(dataset.data.factMarginRecords || [], plan, metadata);
+        // Check if question includes intent words that require extra metrics (driver analysis, root cause, etc.)
+        const questionLower = question.toLowerCase();
+        const intentWords = ['driver', 'why', 'explain', 'what drives', 'breakdown of drivers', 'root cause', 'cause', 'drivers of'];
+        const includeExtraMetrics = intentWords.some(word => questionLower.includes(word));
+        
+        const result = executeQuery(dataset.data.factMarginRecords || [], plan, metadata, includeExtraMetrics);
         
         // Log results for debugging
         console.log('Execution result:', {
@@ -307,13 +317,20 @@ export async function POST(request: NextRequest) {
         }
 
         // Build key findings from results
+        // Only include the requested metric by default (unless extra metrics were requested)
         const keyFindings = result.topRows.slice(0, 10).map((row, idx) => {
             const dimValues = Object.entries(row.dimensionValues)
                 .map(([k, v]) => `${k}: ${v}`)
                 .join(', ');
             
-            const measureValues = Object.entries(row.measures)
-                .map(([k, v]) => {
+            // Filter measures to only include requested metric (and extra metrics if requested)
+            const measuresToInclude = includeExtraMetrics 
+                ? Object.keys(row.measures) // Include all if extra metrics requested
+                : [result.plan.metric]; // Only include requested metric
+            
+            const measureValues = measuresToInclude
+                .map((k) => {
+                    const v = row.measures[k];
                     if (v === null || v === undefined) return null;
                     
                     // Determine unit: use exact key lookup, NO guessing from key name
@@ -332,7 +349,8 @@ export async function POST(request: NextRequest) {
                     }
                     
                     const formatted = formatMetricValue(v, unit);
-                    return `${k}: ${formatted}`;
+                    const label = getMetricLabel(k);
+                    return `${label}: ${formatted}`;
                 })
                 .filter(v => v !== null)
                 .join(', ');
@@ -366,8 +384,8 @@ export async function POST(request: NextRequest) {
                     formattedValue: formatMetricValue(metricValue, metricUnit),
                     label: getMetricLabel(result.plan.metric),
                     unit: metricUnit,
-                    // Only include percentage if it's actually a percent metric
-                    percentage: metricUnit === 'percent' ? metricValue * 100 : (r.measures['MarginPct'] ? r.measures['MarginPct'] * 100 : undefined)
+                    // Only include percentage if it's actually a percent metric (and only if it's the requested metric)
+                    percentage: metricUnit === 'percent' ? metricValue * 100 : undefined
                 };
             }),
             recommendations: [],

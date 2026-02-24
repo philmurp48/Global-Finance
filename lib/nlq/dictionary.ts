@@ -17,7 +17,7 @@ export const DIMENSIONS: Dimension[] = [
     { key: "LineOfBusiness", type: "name", synonyms: ["lob", "line of business", "business line"] },
 
     { key: "GeographyID", type: "id", displayKey: "Geography" },
-    { key: "Geography", type: "name", synonyms: ["geo", "region", "market"] },
+    { key: "Geography", type: "name", synonyms: ["geo", "geography", "region", "market"] },
 
     { key: "ProductTypeID", type: "id", displayKey: "ProductType" },
     { key: "ProductType", type: "name", synonyms: ["product", "product type", "offering"] }

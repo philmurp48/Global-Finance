@@ -13,7 +13,8 @@ const MIN_REVENUE_THRESHOLD = 1; // 1 $mm (data is already in millions)
 export function executeQuery(
     records: any[],
     plan: QueryPlan,
-    metadata?: DatasetMetadata
+    metadata?: DatasetMetadata,
+    includeExtraMetrics: boolean = false
 ): ExecutionResult {
     if (!records || records.length === 0) {
         return {
@@ -92,7 +93,7 @@ export function executeQuery(
                 dimensionValues[dim] = value;
             });
 
-            const measures = aggregateMeasures(groupRecords, plan.metric);
+            const measures = aggregateMeasures(groupRecords, plan.metric, includeExtraMetrics);
             
             aggregatedRows.push({
                 dimensionValues,
@@ -111,7 +112,7 @@ export function executeQuery(
     }
 
     // Apply sorting and topN
-    if (plan.operation === 'top' || plan.operation === 'bottom') {
+    if (plan.operation === 'top' || plan.operation === 'bottom' || plan.operation === 'breakdown') {
         // Sort by metric value
         aggregatedRows.sort((a, b) => {
             const aVal = a.measures[plan.metric] || 0;
@@ -134,7 +135,7 @@ export function executeQuery(
             return plan.sortDirection === 'asc' ? (aVal - bVal) : (bVal - aVal);
         });
 
-        // Apply topN
+        // Apply topN (for top, bottom, and breakdown operations)
         if (plan.topN) {
             aggregatedRows = aggregatedRows.slice(0, plan.topN);
         }
@@ -173,7 +174,7 @@ export function executeQuery(
  * Aggregate measures for a set of records
  * NEVER performs ratio math for usd_mm metrics
  */
-function aggregateMeasures(records: any[], metricKey: string): Record<string, number> {
+function aggregateMeasures(records: any[], metricKey: string, includeExtraMetrics: boolean = false): Record<string, number> {
     const aggregated: Record<string, number> = {};
     // Use exact key lookup (NOT findMeasure which is for NL parsing)
     const measure = getMeasureByKey(metricKey);
@@ -256,8 +257,9 @@ function aggregateMeasures(records: any[], metricKey: string): Record<string, nu
         aggregated[metricKey] = denominatorSum > 0 ? (numeratorSum / denominatorSum) : 0;
     }
 
-    // Also compute supporting measures if needed (e.g., revenue for margin%)
-    if (metricKey === 'MarginPct') {
+    // Also compute supporting measures if requested (e.g., revenue for margin%)
+    // Only include extra metrics if explicitly requested (for driver analysis, root cause, etc.)
+    if (includeExtraMetrics && metricKey === 'MarginPct') {
         let revenueSum = 0;
         let marginSum = 0;
         records.forEach(record => {
@@ -285,6 +287,8 @@ function buildAggregationDefinition(plan: QueryPlan, resultCount: number): strin
         parts.push(`Top ${plan.topN} results`);
     } else if (plan.operation === 'bottom' && plan.topN) {
         parts.push(`Bottom ${plan.topN} results`);
+    } else if (plan.operation === 'breakdown' && plan.topN) {
+        parts.push(`Breakdown (top ${plan.topN})`);
     } else if (plan.operation === 'trend') {
         parts.push(`Trend over time`);
     }
@@ -329,6 +333,10 @@ function buildAnswerText(
     
     if (plan.operation === 'top' || plan.operation === 'bottom') {
         return `${dimValues || 'Top result'} - ${displayLabel}: ${formattedValue}`;
+    }
+    
+    if (plan.operation === 'breakdown') {
+        return `${dimValues || 'Result'} - ${displayLabel}: ${formattedValue}`;
     }
 
     return `${dimValues || 'Result'} - ${displayLabel}: ${formattedValue}`;

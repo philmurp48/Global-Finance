@@ -104,12 +104,30 @@ export function planQuery(
         plan.operation = 'single';
     }
 
-    // 3. Detect groupBy from "by X" or "per X"
+    // 3. Detect groupBy from various patterns ("by X", "per X", "for each X", etc.)
     const groupByText = extractGroupBy(question);
     if (groupByText) {
         const dim = findDimension(groupByText);
         if (dim) {
             plan.groupBy = [getDimensionDisplayField(dim)];
+            
+            // If groupBy is identified, set operation based on question intent
+            // If question includes ranking words (highest/max/top) => "top" operation
+            // Otherwise => "breakdown" operation (return all groups or top 10)
+            if (containsAny(question, ['highest', 'max', 'maximum', 'top', 'best', 'largest'])) {
+                plan.operation = 'top';
+                const topN = extractNumber(question);
+                plan.topN = topN || 10; // Default to top 10 if no number specified
+            } else if (containsAny(question, ['lowest', 'min', 'minimum', 'bottom', 'worst', 'smallest'])) {
+                plan.operation = 'bottom';
+                const bottomN = extractNumber(question);
+                plan.topN = bottomN || 10;
+                plan.sortDirection = 'asc';
+            } else {
+                // Default to breakdown: return all groups or top 10
+                plan.operation = 'breakdown';
+                plan.topN = 10; // Limit to top 10 for breakdowns
+            }
         }
     }
 
@@ -170,17 +188,25 @@ export function planQuery(
         }
     }
 
-    // 5. Detect filters from metadata (match known dimension values)
+    // 5. Detect filters from metadata (match known dimension NAME values, not just IDs)
+    // Ensure we're matching against the display field (name) values, not ID values
     if (metadata) {
         for (const [dimKey, values] of Object.entries(metadata.dimensions)) {
+            // Find the dimension definition to get the display field
+            const dim = DIMENSIONS.find(d => d.key === dimKey || getDimensionDisplayField(d) === dimKey);
+            const displayField = dim ? getDimensionDisplayField(dim) : dimKey;
+            
             for (const value of values) {
                 const valueLower = normalizeText(value);
+                // Match if query contains the dimension value (case-insensitive, normalized)
                 if (queryLower.includes(valueLower) && valueLower.length > 2) {
-                    if (!plan.filters[dimKey]) {
-                        plan.filters[dimKey] = [];
+                    // Use the display field name for the filter key
+                    if (!plan.filters[displayField]) {
+                        plan.filters[displayField] = [];
                     }
-                    if (!plan.filters[dimKey].includes(value)) {
-                        plan.filters[dimKey].push(value);
+                    // Store the original value (not normalized) for exact matching
+                    if (!plan.filters[displayField].includes(value)) {
+                        plan.filters[displayField].push(value);
                     }
                 }
             }

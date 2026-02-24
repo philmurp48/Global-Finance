@@ -385,11 +385,11 @@ export default function ManagementReportingLayout({
                             {/* User Section - Simplified */}
                             <div className="mb-6 p-4 bg-black/20 rounded-lg mx-4">
                                 <div className="flex items-center space-x-3 mb-2">
-                                    <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-500/50">
+                                    <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-purple-500/50 bg-white p-1">
                                         <img
-                                            src="/images/Sarah-Johnson-Finance-Executive-headshot.png"
-                                            alt="Sarah Johnson"
-                                            className="w-full h-full object-cover"
+                                            src="/logo.svg"
+                                            alt="Global Finance Logo"
+                                            className="w-full h-full object-contain"
                                         />
                                     </div>
                                     <div>

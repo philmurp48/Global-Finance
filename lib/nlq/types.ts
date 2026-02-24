@@ -26,14 +26,14 @@ export interface DerivedMetric {
 
 export interface QueryPlan {
     metric: string; // Single metric key
-    operation: 'single' | 'trend' | 'top' | 'bottom';
+    operation: 'single' | 'trend' | 'top' | 'bottom' | 'breakdown';
     groupBy: string[]; // Dimension keys to group by
     filters: Record<string, string[]>; // Dimension filters: { CostCenter: ['ABC', 'XYZ'] }
     timeWindow: {
         type: 'quarter' | 'year' | 'period' | 'latest' | 'all';
         value?: string; // e.g., '2024Q1', '2024'
     };
-    topN?: number; // For top/bottom operations
+    topN?: number; // For top/bottom/breakdown operations
     sortDirection?: 'asc' | 'desc'; // Sort direction
 }
 
