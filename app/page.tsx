@@ -427,6 +427,7 @@ export default function HomePage() {
     const [isSearching, setIsSearching] = useState(false);
     const [isSearchFocused, setIsSearchFocused] = useState(false);
     const [excelData, setExcelData] = useState<ExcelDriverTreeData | null>(null);
+    const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
 
     // Load Excel data on mount
     useEffect(() => {
@@ -552,9 +553,9 @@ export default function HomePage() {
         return null;
     };
     
-    // Helper to get max quarter value and trend vs quarter-1 for a field
+    // Helper to get selected quarter value (average) and trend vs previous quarter for a field
     const getKPIValueAndTrend = (fieldName: string): { value: number; trend: number; maxQuarter: string; prevQuarter: string | null } => {
-        if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+        if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0 || !selectedQuarter) {
             return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
         }
         
@@ -583,23 +584,31 @@ export default function HomePage() {
             return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
         }
         
-        // Sort quarters and get max quarter
+        // Sort quarters
         const sortedQuarters = quarters.sort();
-        const maxQuarter = sortedQuarters[sortedQuarters.length - 1];
-        const maxQuarterIndex = sortedQuarters.indexOf(maxQuarter);
-        const prevQuarter = maxQuarterIndex > 0 ? sortedQuarters[maxQuarterIndex - 1] : null;
+        const currentQuarter = selectedQuarter;
+        const currentQuarterIndex = sortedQuarters.indexOf(currentQuarter);
+        const prevQuarter = currentQuarterIndex > 0 ? sortedQuarters[currentQuarterIndex - 1] : null;
         
-        // Calculate max quarter value (sum all records for that quarter)
-        const maxQuarterValue = quarterData[maxQuarter]?.reduce((sum, val) => sum + val, 0) || 0;
-        const prevQuarterValue = prevQuarter ? (quarterData[prevQuarter]?.reduce((sum, val) => sum + val, 0) || 0) : 0;
+        // Calculate average for selected quarter (not sum)
+        const currentQuarterValues = quarterData[currentQuarter] || [];
+        const currentQuarterAvg = currentQuarterValues.length > 0 
+            ? currentQuarterValues.reduce((sum, val) => sum + val, 0) / currentQuarterValues.length 
+            : 0;
+        
+        // Calculate average for previous quarter
+        const prevQuarterValues = prevQuarter ? (quarterData[prevQuarter] || []) : [];
+        const prevQuarterAvg = prevQuarterValues.length > 0 
+            ? prevQuarterValues.reduce((sum, val) => sum + val, 0) / prevQuarterValues.length 
+            : 0;
         
         // Calculate trend percentage
-        const trend = prevQuarterValue !== 0 ? ((maxQuarterValue - prevQuarterValue) / Math.abs(prevQuarterValue)) * 100 : 0;
+        const trend = prevQuarterAvg !== 0 ? ((currentQuarterAvg - prevQuarterAvg) / Math.abs(prevQuarterAvg)) * 100 : 0;
         
         return {
-            value: maxQuarterValue,
+            value: currentQuarterAvg,
             trend: trend,
-            maxQuarter: maxQuarter,
+            maxQuarter: currentQuarter,
             prevQuarter: prevQuarter
         };
     };
@@ -1002,7 +1011,7 @@ export default function HomePage() {
         }
 
         return insights; // Return all tiles from Fact_Margin data
-    }, [excelMetrics]);
+    }, [excelMetrics, selectedQuarter]);
 
     const handleInsightClick = (insight: any) => {
         // Navigate to Operational Performance page with field name as query parameter
@@ -4256,7 +4265,9 @@ export default function HomePage() {
         // Format value based on field type
         let formattedValue = '';
         if (fieldName.includes('_pct') || fieldName.includes('_bps')) {
-            formattedValue = `${kpiData.value.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
+            // Convert decimal to percentage by multiplying by 100 for _pct fields
+            const displayValue = fieldName.includes('_pct') ? kpiData.value * 100 : kpiData.value;
+            formattedValue = `${displayValue.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
         } else if (fieldName.includes('_$mm')) {
             formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
         } else if (fieldName.includes('FTE') || fieldName.includes('Fte')) {
@@ -4389,7 +4400,7 @@ export default function HomePage() {
         };
         
         const getKPIValueAndTrend = (fieldName: string): { value: number; trend: number; maxQuarter: string; prevQuarter: string | null } => {
-            if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0 || !selectedQuarter) {
                 return { value: 0, trend: 0, maxQuarter: '', prevQuarter: null };
             }
             
@@ -4418,19 +4429,28 @@ export default function HomePage() {
             }
             
             const sortedQuarters = quarters.sort();
-            const maxQuarter = sortedQuarters[sortedQuarters.length - 1];
-            const maxQuarterIndex = sortedQuarters.indexOf(maxQuarter);
-            const prevQuarter = maxQuarterIndex > 0 ? sortedQuarters[maxQuarterIndex - 1] : null;
+            const currentQuarter = selectedQuarter;
+            const currentQuarterIndex = sortedQuarters.indexOf(currentQuarter);
+            const prevQuarter = currentQuarterIndex > 0 ? sortedQuarters[currentQuarterIndex - 1] : null;
             
-            const maxQuarterValue = quarterData[maxQuarter]?.reduce((sum, val) => sum + val, 0) || 0;
-            const prevQuarterValue = prevQuarter ? (quarterData[prevQuarter]?.reduce((sum, val) => sum + val, 0) || 0) : 0;
+            // Calculate average for selected quarter (not sum)
+            const currentQuarterValues = quarterData[currentQuarter] || [];
+            const currentQuarterAvg = currentQuarterValues.length > 0 
+                ? currentQuarterValues.reduce((sum, val) => sum + val, 0) / currentQuarterValues.length 
+                : 0;
             
-            const trend = prevQuarterValue !== 0 ? ((maxQuarterValue - prevQuarterValue) / Math.abs(prevQuarterValue)) * 100 : 0;
+            // Calculate average for previous quarter
+            const prevQuarterValues = prevQuarter ? (quarterData[prevQuarter] || []) : [];
+            const prevQuarterAvg = prevQuarterValues.length > 0 
+                ? prevQuarterValues.reduce((sum, val) => sum + val, 0) / prevQuarterValues.length 
+                : 0;
+            
+            const trend = prevQuarterAvg !== 0 ? ((currentQuarterAvg - prevQuarterAvg) / Math.abs(prevQuarterAvg)) * 100 : 0;
             
             return {
-                value: maxQuarterValue,
+                value: currentQuarterAvg,
                 trend: trend,
-                maxQuarter: maxQuarter,
+                maxQuarter: currentQuarter,
                 prevQuarter: prevQuarter
             };
         };
@@ -4444,10 +4464,12 @@ export default function HomePage() {
             
             let formattedValue = '';
             if (fieldName.includes('_pct') || fieldName.includes('_bps')) {
-                formattedValue = `${kpiData.value.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
+                // Convert decimal to percentage by multiplying by 100 for _pct fields
+                const displayValue = fieldName.includes('_pct') ? kpiData.value * 100 : kpiData.value;
+                formattedValue = `${displayValue.toFixed(2)}${fieldName.includes('bps') ? ' bps' : '%'}`;
             } else if (fieldName.includes('_$mm')) {
-                // For TransactionRevenue and AcquisitionCostPerClient, use more appropriate units
-                if (fieldName.toLowerCase().includes('transactionrevenue') || fieldName.toLowerCase().includes('acquisitioncostperclient')) {
+                // For TransactionRevenue, use more appropriate units
+                if (fieldName.toLowerCase().includes('transactionrevenue')) {
                     // If value is less than 1 million (1000 in thousands), show in thousands
                     // Otherwise show in millions with more precision
                     if (kpiData.value < 1000) {
@@ -4457,6 +4479,17 @@ export default function HomePage() {
                         formattedValue = `$${(kpiData.value / 1000).toFixed(1)}K`;
                     } else {
                         formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
+                    }
+                } else if (fieldName.toLowerCase().includes('acquisitioncostperclient')) {
+                    // AcquisitionCostPerClient is in $mm, so multiply by 1,000,000 to get actual dollars
+                    // Then format appropriately based on the actual dollar amount
+                    const actualDollars = kpiData.value * 1000000;
+                    if (actualDollars < 1000) {
+                        formattedValue = `$${actualDollars.toFixed(0)}`;
+                    } else if (actualDollars < 1000000) {
+                        formattedValue = `$${(actualDollars / 1000).toFixed(1)}K`;
+                    } else {
+                        formattedValue = `$${(actualDollars / 1000000).toFixed(2)}M`;
                     }
                 } else {
                     formattedValue = `$${(kpiData.value / 1000).toFixed(2)}M`;
@@ -4511,7 +4544,35 @@ export default function HomePage() {
                 buildKPITile('TransactionRevenue_$mm', DollarSign, 'bg-sky-50', 'text-sky-700')
             ]
         };
+    }, [excelData, selectedQuarter]);
+    
+    // Get all available quarters from the data
+    const availableQuarters = useMemo(() => {
+        if (!excelData?.factMarginRecords || excelData.factMarginRecords.length === 0) {
+            return [];
+        }
+        
+        const quarters: string[] = [];
+        excelData.factMarginRecords.forEach(record => {
+            const quarterKey = Object.keys(record).find(key => key.toLowerCase() === 'quarter');
+            if (quarterKey && record[quarterKey]) {
+                const quarter = String(record[quarterKey]).trim();
+                if (quarter && !quarters.includes(quarter)) {
+                    quarters.push(quarter);
+                }
+            }
+        });
+        
+        // Sort quarters
+        return quarters.sort();
     }, [excelData]);
+    
+    // Set selected quarter to latest when data loads or changes
+    useEffect(() => {
+        if (availableQuarters.length > 0 && !selectedQuarter) {
+            setSelectedQuarter(availableQuarters[availableQuarters.length - 1]);
+        }
+    }, [availableQuarters, selectedQuarter]);
     
     return (
         <div className="flex-1">
@@ -4534,8 +4595,26 @@ export default function HomePage() {
                                 <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
                             </div>
                             <div>
-                                <h2 className="text-2xl font-bold text-navy-900">Hi Sarah,</h2>
-                                <p className="text-sm text-gray-600">Here's your executive overview for today</p>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <h2 className="text-2xl font-bold text-navy-900">Hi Sarah,</h2>
+                                    {availableQuarters.length > 0 && (
+                                        <>
+                                            <select
+                                                value={selectedQuarter || ''}
+                                                onChange={(e) => setSelectedQuarter(e.target.value)}
+                                                className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-semibold rounded-full border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                            >
+                                                {availableQuarters.map((quarter) => (
+                                                    <option key={quarter} value={quarter}>
+                                                        {quarter}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <span className="text-sm text-gray-600 font-medium">Average Measures</span>
+                                        </>
+                                    )}
+                                </div>
+                                <p className="text-sm text-gray-600 mt-1">Here's your executive overview for today</p>
                             </div>
                         </div>
                         
