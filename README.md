@@ -39,7 +39,7 @@ A comprehensive management reporting and analytics platform built with Next.js, 
 - **UI Components**: Radix UI
 - **Excel Processing**: xlsx
 - **AI Integration**: OpenAI GPT-4 (for intelligent search and analysis)
-- **Data Storage**: Supabase / Vercel KV / In-memory fallback
+- **Data Storage**: Upstash Redis
 
 ## Getting Started
 
@@ -75,26 +75,27 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
-**Required for data storage (choose one):**
+**Required for data storage (production):**
 
-For **Vercel Blob** (recommended for Vercel deployments):
+You can use either set of environment variables:
+
+**Option 1 (Recommended):**
 ```
-BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+UPSTASH_REDIS_REST_URL=your_upstash_redis_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_redis_token
 ```
 
-For **Upstash Redis**:
+**Option 2 (Alternative/Legacy):**
 ```
 KV_REST_API_URL=your_upstash_redis_url
 KV_REST_API_TOKEN=your_upstash_redis_token
 ```
 
-For **Vercel KV**:
-```
-KV_REST_API_URL=your_vercel_kv_url
-KV_REST_API_TOKEN=your_vercel_kv_token
-```
+Get your Upstash Redis credentials from [Upstash Console](https://console.upstash.com/).
 
-**Note:** If none of the above are configured, the app will use in-memory storage (DEV ONLY - data is lost on server restart).
+**Note:** 
+- In **production**, at least one set of these variables must be configured or the app will throw an error.
+- In **development** (local), if neither is set, the app will use in-memory storage with a warning (data will be lost on server restart).
 
 **Optional (for other features):**
 ```
