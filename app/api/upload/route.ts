@@ -99,9 +99,9 @@ export async function POST(request: NextRequest) {
             try {
                 // Try Map first
                 if (dimTables instanceof Map || (typeof dimTables === 'object' && dimTables.entries && typeof dimTables.entries === 'function')) {
-                    const entries = Array.from(dimTables.entries()) as [string, any][];
+                    const entries = Array.from(dimTables.entries());
                     return Object.fromEntries(
-                        entries.map(([tableName, records]) => {
+                        entries.map(([tableName, records]: [string, any]) => {
                             // Convert inner Map/object
                             const recordEntries = toEntries(records);
                             return [tableName, Object.fromEntries(recordEntries)];
