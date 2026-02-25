@@ -176,24 +176,40 @@ function OperationalPerformanceContent() {
                 dimValuesMap[dimName] = values.sort((a, b) => a.description.localeCompare(b.description));
             } else {
                 // If no dimension table found, extract unique values from Fact_Margin records
-                const valuesSet = new Set<string>();
+                // Try to get descriptions directly from records first
+                const valuesMap = new Map<string, string>(); // Map of ID -> Description
                 if (excelData.factMarginRecords && Array.isArray(excelData.factMarginRecords)) {
                     const idFieldName = Object.keys(idFieldToDimName).find(k => idFieldToDimName[k] === dimName) || 
                                        `${dimName}ID`;
+                    const descriptionFieldName = getDimensionDescriptionFieldName(dimName);
                     
                     excelData.factMarginRecords.forEach(record => {
                         if (!record) return;
-                        const idValue = record[idFieldName];
-                        if (idValue !== undefined && idValue !== null && idValue !== '') {
-                            valuesSet.add(String(idValue));
+                        
+                        // First try to get description directly from record
+                        if (record[descriptionFieldName] !== undefined && record[descriptionFieldName] !== null && record[descriptionFieldName] !== '') {
+                            const idValue = record[idFieldName];
+                            const description = String(record[descriptionFieldName]).trim();
+                            if (idValue !== undefined && idValue !== null && idValue !== '' && description) {
+                                valuesMap.set(String(idValue), description);
+                            }
+                        } else {
+                            // Fallback: use ID as both ID and description
+                            const idValue = record[idFieldName];
+                            if (idValue !== undefined && idValue !== null && idValue !== '') {
+                                const idStr = String(idValue);
+                                if (!valuesMap.has(idStr)) {
+                                    valuesMap.set(idStr, idStr); // Use ID as description
+                                }
+                            }
                         }
                     });
                 }
                 
                 // Convert to array format
-                const values = Array.from(valuesSet).map(id => ({
+                const values = Array.from(valuesMap.entries()).map(([id, description]) => ({
                     id: String(id),
-                    description: String(id) // Use ID as description if no dimension table
+                    description: description
                 })).sort((a, b) => a.description.localeCompare(b.description));
                 
                 if (values.length > 0) {
@@ -265,6 +281,19 @@ function OperationalPerformanceContent() {
         return mapping[dimName] || `${dimName}ID`;
     };
 
+    // Helper function to get description field name from dimension name
+    const getDimensionDescriptionFieldName = (dimName: string): string => {
+        const mapping: { [key: string]: string } = {
+            'LineOfBusiness': 'LineOfBusiness',
+            'LegalEntity': 'LegalEntity',
+            'CostCenter': 'CostCenter',
+            'Geography': 'Geography',
+            'ProductType': 'ProductType',
+            'Scenario': 'Scenario'
+        };
+        return mapping[dimName] || dimName;
+    };
+
     // Helper function to get dimension description from ID value
     const getDimensionDescription = (dimName: string, idValue: any, dimensionTables: DimensionTables): string | null => {
         if (!idValue && idValue !== 0) return null;
@@ -283,24 +312,80 @@ function OperationalPerformanceContent() {
             tableNames.push('Dim_LOB', 'DIM_LOB');
         }
         
+        // Try to find dimension table (case-insensitive)
+        let dimTable: Map<string, DimensionRecord> | undefined = undefined;
+        let foundTableName: string | null = null;
+        
         for (const tableName of tableNames) {
-            const dimTable = dimensionTables.get(tableName);
+            dimTable = dimensionTables.get(tableName);
             if (dimTable) {
-                const dimRecord = dimTable.get(idStr);
-                if (dimRecord) {
-                    // Find the display field (usually name, description, or first non-ID field)
-                    const displayField = Object.keys(dimRecord).find(key => 
-                        !key.toLowerCase().includes('id') && 
-                        (key.toLowerCase().includes('name') || 
-                         key.toLowerCase().includes('description') ||
-                         key.toLowerCase().includes('code'))
-                    ) || Object.keys(dimRecord).find(key => !key.toLowerCase().includes('id'));
-                    
-                    if (displayField) {
-                        return String(dimRecord[displayField]);
+                foundTableName = tableName;
+                break;
+            }
+        }
+        
+        // If not found, try case-insensitive match
+        if (!dimTable) {
+            for (const [tableName, table] of dimensionTables.entries()) {
+                for (const targetName of tableNames) {
+                    if (tableName.toLowerCase() === targetName.toLowerCase()) {
+                        dimTable = table;
+                        foundTableName = tableName;
+                        break;
                     }
                 }
+                if (dimTable) break;
             }
+        }
+        
+        // If still not found, try to find table by dimension name pattern
+        if (!dimTable) {
+            const dimNameLower = dimName.toLowerCase();
+            for (const [tableName, table] of dimensionTables.entries()) {
+                const tableNameLower = tableName.toLowerCase();
+                // Check if table name contains the dimension name (e.g., "DIM_Geography" contains "geography")
+                if (tableNameLower.includes(dimNameLower) || 
+                    tableNameLower.includes(dimNameLower.replace('lineofbusiness', 'lob'))) {
+                    dimTable = table;
+                    foundTableName = tableName;
+                    break;
+                }
+            }
+        }
+        
+        if (!dimTable) {
+            console.warn(`Dimension table not found for ${dimName}. Tried: ${tableNames.join(', ')}. Available tables:`, Array.from(dimensionTables.keys()));
+            return null;
+        }
+        
+        // Try to get the record by ID (try exact match first, then try different formats)
+        let dimRecord = dimTable.get(idStr);
+        
+        // If not found, try with different ID formats
+        if (!dimRecord) {
+            // Try without leading zeros
+            const idNum = parseInt(idStr, 10);
+            if (!isNaN(idNum)) {
+                dimRecord = dimTable.get(String(idNum));
+            }
+        }
+        
+        if (!dimRecord) {
+            // Try all keys to see if any match (for debugging)
+            console.warn(`ID ${idStr} not found in dimension table ${foundTableName}. Available IDs:`, Array.from(dimTable.keys()).slice(0, 10));
+            return null;
+        }
+        
+        // Find the display field (usually name, description, or first non-ID field)
+        const displayField = Object.keys(dimRecord).find(key => 
+            !key.toLowerCase().includes('id') && 
+            (key.toLowerCase().includes('name') || 
+             key.toLowerCase().includes('description') ||
+             key.toLowerCase().includes('code'))
+        ) || Object.keys(dimRecord).find(key => !key.toLowerCase().includes('id'));
+        
+        if (displayField) {
+            return String(dimRecord[displayField]);
         }
         
         return null;
@@ -790,15 +875,54 @@ function OperationalPerformanceContent() {
             }
             
             // Get dimension values for selected dimensions (show all values for selected dimensions)
+            // This builds the set of possible row keys from dimension combinations
             const dimensionValues: { [dimName: string]: Set<string> } = {};
             selectedDimensions.forEach(dimName => {
                 dimensionValues[dimName] = new Set();
                 
-                // Get all available values for this dimension
+                // Get all available values for this dimension from the map (which has descriptions)
                 const dimValues = dimensionValuesMap[dimName] || [];
-                dimValues.forEach(v => {
-                    dimensionValues[dimName].add(v.description);
-                });
+                if (dimValues.length > 0) {
+                    dimValues.forEach(v => {
+                        dimensionValues[dimName].add(v.description);
+                    });
+                } else {
+                    // If dimensionValuesMap doesn't have values, try to extract from dimension tables directly
+                    const idFieldName = getDimensionIdFieldName(dimName);
+                    const tableNames = [`Dim_${dimName}`, `DIM_${dimName}`];
+                    if (dimName === 'LineOfBusiness') {
+                        tableNames.push('Dim_LOB', 'DIM_LOB');
+                    }
+                    
+                    for (const tableName of tableNames) {
+                        let dimTable = excelData.dimensionTables.get(tableName);
+                        if (!dimTable) {
+                            // Try case-insensitive match
+                            for (const [tName, t] of excelData.dimensionTables.entries()) {
+                                if (tName.toLowerCase() === tableName.toLowerCase()) {
+                                    dimTable = t;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (dimTable) {
+                            dimTable.forEach((record, id) => {
+                                const displayField = Object.keys(record).find(key => 
+                                    !key.toLowerCase().includes('id') && 
+                                    (key.toLowerCase().includes('name') || 
+                                     key.toLowerCase().includes('description') ||
+                                     key.toLowerCase().includes('code'))
+                                ) || Object.keys(record).find(key => !key.toLowerCase().includes('id'));
+                                
+                                if (displayField) {
+                                    dimensionValues[dimName].add(String(record[displayField]));
+                                }
+                            });
+                            break; // Found the table, no need to try others
+                        }
+                    }
+                }
             });
 
             // Create row keys from dimension combinations (only selected values)
@@ -884,9 +1008,24 @@ function OperationalPerformanceContent() {
                         
                         selectedDimensions.forEach(dimName => {
                             try {
-                                // Get the ID field name for this dimension
+                                // Get the ID field name and description field name for this dimension
                                 const idFieldName = getDimensionIdFieldName(dimName);
+                                const descriptionFieldName = getDimensionDescriptionFieldName(dimName);
                                 
+                                // FIRST: Check if the record already has a description field (e.g., CostCenter, Geography)
+                                // This is the most reliable since Fact_Margin records often contain both ID and description
+                                if (record[descriptionFieldName] !== undefined && record[descriptionFieldName] !== null && record[descriptionFieldName] !== '') {
+                                    const description = String(record[descriptionFieldName]).trim();
+                                    if (description) {
+                                        dimValues.push(description);
+                                        if (recordIndex === 0) {
+                                            console.log(`✓ Found description directly in record for ${dimName}: ${description}`);
+                                        }
+                                        return; // Success, move to next dimension
+                                    }
+                                }
+                                
+                                // SECOND: If no description field in record, try to get ID and look up in dimension tables
                                 const idValue = record[idFieldName];
                                 if (idValue !== undefined && idValue !== null && idValue !== '') {
                                     // Try both Dim_ and DIM_ prefix for dimension table name
@@ -919,8 +1058,13 @@ function OperationalPerformanceContent() {
                                         ) || Object.keys(dimRecord).find(key => !key.toLowerCase().includes('id'));
                                         
                                         if (displayField) {
-                                            dimValues.push(String(dimRecord[displayField]));
+                                            const description = String(dimRecord[displayField]);
+                                            dimValues.push(description);
+                                            if (recordIndex === 0) {
+                                                console.log(`✓ Found description from DIM table for ${dimName} ID ${idValue}: ${description}`);
+                                            }
                                         } else {
+                                            console.warn(`No display field found in dimension record for ${dimName} ID ${idValue}`);
                                             allDimsFound = false;
                                         }
                                     } else {
@@ -928,9 +1072,23 @@ function OperationalPerformanceContent() {
                                         const description = getDimensionDescription(dimName, idValue, excelData.dimensionTables);
                                         if (description) {
                                             dimValues.push(description);
+                                            if (recordIndex === 0) {
+                                                console.log(`✓ Found description via direct lookup for ${dimName} ID ${idValue}: ${description}`);
+                                            }
                                         } else {
-                                            // Last resort: use ID value
-                                            dimValues.push(String(idValue));
+                                            // Last resort: try to find description from dimensionValuesMap
+                                            const dimValuesList = dimensionValuesMap[dimName] || [];
+                                            const foundValue = dimValuesList.find(v => v.id === String(idValue));
+                                            if (foundValue) {
+                                                dimValues.push(foundValue.description);
+                                                if (recordIndex === 0) {
+                                                    console.log(`✓ Found description from dimensionValuesMap for ${dimName} ID ${idValue}: ${foundValue.description}`);
+                                                }
+                                            } else {
+                                                // Last resort: use ID value (shouldn't happen if dimension tables are correct)
+                                                console.warn(`⚠ Could not find description for ${dimName} ID: ${idValue}. Using ID as fallback.`);
+                                                dimValues.push(String(idValue));
+                                            }
                                         }
                                     }
                                 } else {
