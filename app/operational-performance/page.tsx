@@ -39,6 +39,9 @@ function OperationalPerformanceContent() {
     const [selectedDimensions, setSelectedDimensions] = useState<string[]>(['Geography']); // Default to Geography
     const [availableDimensions, setAvailableDimensions] = useState<string[]>([]);
     const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
+    const [selectedPeriods, setSelectedPeriods] = useState<string[]>([]); // Selected quarters for filtering
+    const [selectedDimensionValues, setSelectedDimensionValues] = useState<{ [dimName: string]: string[] }>({}); // Multi-select dimension values
+    const [dimensionValuesMap, setDimensionValuesMap] = useState<{ [dimName: string]: { id: string; description: string }[] }>({}); // Map of dimension name to available values
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set()); // Track expanded sections
     const [hasScrolledToField, setHasScrolledToField] = useState(false);
 
@@ -79,9 +82,126 @@ function OperationalPerformanceContent() {
     useEffect(() => {
         if (!excelData) return;
 
+        // Extract dimensions from Fact_Margin records by looking for ID fields
+        const dimensionFields = new Set<string>();
+        if (excelData.factMarginRecords && Array.isArray(excelData.factMarginRecords) && excelData.factMarginRecords.length > 0) {
+            const firstRecord = excelData.factMarginRecords[0];
+            Object.keys(firstRecord).forEach(key => {
+                // Look for ID fields (ending with ID or special cases)
+                const keyLower = key.toLowerCase();
+                if (keyLower.endsWith('id') || key === 'LOBID' || key === 'Scenario') {
+                    dimensionFields.add(key);
+                }
+            });
+        }
+
         // Get available dimension tables
         const dimTables = getDimensionTableNames(excelData.dimensionTables);
-        setAvailableDimensions(dimTables.map(name => name.replace('Dim_', '').replace('DIM_', '')));
+        const dimNamesFromTables = dimTables.map(name => name.replace('Dim_', '').replace('DIM_', ''));
+        
+        // Map ID field names to dimension names
+        const idFieldToDimName: { [key: string]: string } = {
+            'LOBID': 'LineOfBusiness',
+            'LegalEntityID': 'LegalEntity',
+            'CostCenterID': 'CostCenter',
+            'GeographyID': 'Geography',
+            'ProductTypeID': 'ProductType',
+            'Scenario': 'Scenario'
+        };
+
+        // Combine dimensions from both sources
+        const allDimNames = new Set<string>();
+        
+        // Add dimensions from ID fields
+        dimensionFields.forEach(idField => {
+            const dimName = idFieldToDimName[idField] || idField.replace(/ID$/, '');
+            allDimNames.add(dimName);
+        });
+        
+        // Add dimensions from dimension tables
+        dimNamesFromTables.forEach(dimName => {
+            allDimNames.add(dimName);
+        });
+
+        const dimNamesArray = Array.from(allDimNames).sort();
+        setAvailableDimensions(dimNamesArray);
+
+        // Populate dimension values map from dimension tables
+        const dimValuesMap: { [dimName: string]: { id: string; description: string }[] } = {};
+        dimNamesArray.forEach(dimName => {
+            // Try to find matching dimension table
+            const dimTableName = `Dim_${dimName}`;
+            const dimTableNameUpper = `DIM_${dimName}`;
+            
+            // Also try alternative names
+            let dimTable = excelData.dimensionTables.get(dimTableName);
+            if (!dimTable) {
+                dimTable = excelData.dimensionTables.get(dimTableNameUpper);
+            }
+            
+            // Try mapping back to ID field name for table lookup
+            if (!dimTable) {
+                const idFieldName = Object.keys(idFieldToDimName).find(k => idFieldToDimName[k] === dimName);
+                if (idFieldName) {
+                    const baseName = idFieldName.replace(/ID$/, '');
+                    dimTable = excelData.dimensionTables.get(`Dim_${baseName}`) || 
+                               excelData.dimensionTables.get(`DIM_${baseName}`);
+                }
+            }
+            
+            if (dimTable) {
+                const values: { id: string; description: string }[] = [];
+                dimTable.forEach((record, id) => {
+                    // Find the display field (usually name, description, or first non-ID field)
+                    const displayField = Object.keys(record).find(key => 
+                        !key.toLowerCase().includes('id') && 
+                        (key.toLowerCase().includes('name') || 
+                         key.toLowerCase().includes('description') ||
+                         key.toLowerCase().includes('code'))
+                    ) || Object.keys(record).find(key => !key.toLowerCase().includes('id'));
+                    
+                    if (displayField) {
+                        values.push({
+                            id: String(id),
+                            description: String(record[displayField])
+                        });
+                    } else {
+                        // Fallback to ID if no description field found
+                        values.push({
+                            id: String(id),
+                            description: String(id)
+                        });
+                    }
+                });
+                dimValuesMap[dimName] = values.sort((a, b) => a.description.localeCompare(b.description));
+            } else {
+                // If no dimension table found, extract unique values from Fact_Margin records
+                const valuesSet = new Set<string>();
+                if (excelData.factMarginRecords && Array.isArray(excelData.factMarginRecords)) {
+                    const idFieldName = Object.keys(idFieldToDimName).find(k => idFieldToDimName[k] === dimName) || 
+                                       `${dimName}ID`;
+                    
+                    excelData.factMarginRecords.forEach(record => {
+                        if (!record) return;
+                        const idValue = record[idFieldName];
+                        if (idValue !== undefined && idValue !== null && idValue !== '') {
+                            valuesSet.add(String(idValue));
+                        }
+                    });
+                }
+                
+                // Convert to array format
+                const values = Array.from(valuesSet).map(id => ({
+                    id: String(id),
+                    description: String(id) // Use ID as description if no dimension table
+                })).sort((a, b) => a.description.localeCompare(b.description));
+                
+                if (values.length > 0) {
+                    dimValuesMap[dimName] = values;
+                }
+            }
+        });
+        setDimensionValuesMap(dimValuesMap);
 
         // Extract unique quarters from 'Quarter' field in Fact_Margin records
         const quarters = new Set<string>();
@@ -102,7 +222,13 @@ function OperationalPerformanceContent() {
         }
         const sortedQuarters = Array.from(quarters).sort();
         setAvailablePeriods(sortedQuarters);
+        
+        // Initialize selected periods with all available periods
+        if (sortedQuarters.length > 0 && selectedPeriods.length === 0) {
+            setSelectedPeriods(sortedQuarters);
+        }
     }, [excelData]);
+
 
     // Generate combinations of dimension values (must be defined before useMemo)
     const generateCombinations = (arrays: string[][]): string[][] => {
@@ -124,6 +250,60 @@ function OperationalPerformanceContent() {
         });
         
         return combinations;
+    };
+
+    // Helper function to map dimension name to ID field name
+    const getDimensionIdFieldName = (dimName: string): string => {
+        const mapping: { [key: string]: string } = {
+            'LineOfBusiness': 'LOBID',
+            'LegalEntity': 'LegalEntityID',
+            'CostCenter': 'CostCenterID',
+            'Geography': 'GeographyID',
+            'ProductType': 'ProductTypeID',
+            'Scenario': 'Scenario'
+        };
+        return mapping[dimName] || `${dimName}ID`;
+    };
+
+    // Helper function to get dimension description from ID value
+    const getDimensionDescription = (dimName: string, idValue: any, dimensionTables: DimensionTables): string | null => {
+        if (!idValue && idValue !== 0) return null;
+        
+        const idStr = String(idValue).trim();
+        if (!idStr) return null;
+        
+        // Try different dimension table name variations
+        const tableNames = [
+            `Dim_${dimName}`,
+            `DIM_${dimName}`,
+        ];
+        
+        // Add alternative names for LineOfBusiness
+        if (dimName === 'LineOfBusiness') {
+            tableNames.push('Dim_LOB', 'DIM_LOB');
+        }
+        
+        for (const tableName of tableNames) {
+            const dimTable = dimensionTables.get(tableName);
+            if (dimTable) {
+                const dimRecord = dimTable.get(idStr);
+                if (dimRecord) {
+                    // Find the display field (usually name, description, or first non-ID field)
+                    const displayField = Object.keys(dimRecord).find(key => 
+                        !key.toLowerCase().includes('id') && 
+                        (key.toLowerCase().includes('name') || 
+                         key.toLowerCase().includes('description') ||
+                         key.toLowerCase().includes('code'))
+                    ) || Object.keys(dimRecord).find(key => !key.toLowerCase().includes('id'));
+                    
+                    if (displayField) {
+                        return String(dimRecord[displayField]);
+                    }
+                }
+            }
+        }
+        
+        return null;
     };
 
     // Helper function to get field value from record with fuzzy matching (must be defined before useMemo)
@@ -582,6 +762,9 @@ function OperationalPerformanceContent() {
             return {} as PnLData;
         }
 
+        // Use selected periods, or all available periods if none selected
+        const periodsToUse = selectedPeriods.length > 0 ? selectedPeriods : availablePeriods;
+
         try {
             const data: PnLData = {};
             
@@ -606,73 +789,24 @@ function OperationalPerformanceContent() {
                 console.log('Fields we are trying to match:', pnlLineItems.filter(i => i.fieldName).map(i => i.fieldName));
             }
             
-            // Get dimension values for selected dimensions
+            // Get dimension values for selected dimensions (show all values for selected dimensions)
             const dimensionValues: { [dimName: string]: Set<string> } = {};
             selectedDimensions.forEach(dimName => {
                 dimensionValues[dimName] = new Set();
-            });
-
-            // Extract dimension values from Fact_Margin records
-            excelData.factMarginRecords.forEach(record => {
-                if (!record) return;
                 
-                selectedDimensions.forEach(dimName => {
-                    try {
-                        // Special handling for dimension ID field names
-                        let idFieldName: string;
-                        if (dimName === 'LineOfBusiness') {
-                            idFieldName = 'LOBID';
-                        } else {
-                            idFieldName = dimName + 'ID';
-                        }
-                        
-                        const idValue = record[idFieldName];
-                        if (idValue !== undefined && idValue !== null && idValue !== '') {
-                            // Try both Dim_ and DIM_ prefix for dimension table name
-                            const dimTableName = `Dim_${dimName}`;
-                            const dimTableNameUpper = `DIM_${dimName}`;
-                            
-                            // Try Dim_ first, then DIM_
-                            let dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
-                            if (!dimRecord) {
-                                dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableNameUpper);
-                            }
-                            
-                            // Debug logging for LineOfBusiness
-                            if (dimName === 'LineOfBusiness' && !dimRecord) {
-                                console.debug(`LineOfBusiness join failed: idFieldName=${idFieldName}, idValue=${idValue}, availableTables=`, 
-                                    Array.from(excelData.dimensionTables.keys()));
-                            }
-                            
-                            if (dimRecord) {
-                                // Find the display field (usually name, description, or first non-ID field)
-                                const displayField = Object.keys(dimRecord).find(key => 
-                                    !key.toLowerCase().includes('id') && 
-                                    (key.toLowerCase().includes('name') || 
-                                     key.toLowerCase().includes('description') ||
-                                     key.toLowerCase().includes('code'))
-                                ) || Object.keys(dimRecord).find(key => !key.toLowerCase().includes('id'));
-                                
-                                if (displayField) {
-                                    dimensionValues[dimName].add(String(dimRecord[displayField]));
-                                }
-                            } else {
-                                // If no dimension record found, use the ID value
-                                dimensionValues[dimName].add(String(idValue));
-                            }
-                        }
-                    } catch (error) {
-                        console.warn(`Error processing dimension ${dimName}:`, error);
-                    }
+                // Get all available values for this dimension
+                const dimValues = dimensionValuesMap[dimName] || [];
+                dimValues.forEach(v => {
+                    dimensionValues[dimName].add(v.description);
                 });
             });
 
-            // Create row keys from dimension combinations
+            // Create row keys from dimension combinations (only selected values)
             const rowKeys: string[] = [];
             if (selectedDimensions.length === 0) {
                 rowKeys.push('Total');
             } else {
-                // Generate all combinations of dimension values
+                // Generate all combinations of selected dimension values
                 const dimArrays = selectedDimensions.map(dim => {
                     const values = dimensionValues[dim];
                     return values && values.size > 0 ? Array.from(values) : [];
@@ -691,7 +825,7 @@ function OperationalPerformanceContent() {
         // Initialize data structure
         rowKeys.forEach(rowKey => {
             data[rowKey] = {};
-            availablePeriods.forEach(period => {
+            periodsToUse.forEach(period => {
                 data[rowKey][period] = {};
                 pnlLineItems.forEach(item => {
                     // Initialize all fields including totals (TotalRevenue_$mm, TotalExpense_$mm)
@@ -734,14 +868,15 @@ function OperationalPerformanceContent() {
                         return;
                     }
                     const period = String(quarter);
-                    if (!availablePeriods.includes(period)) {
+                    // Filter by selected periods
+                    if (!periodsToUse.includes(period)) {
                         skippedRecords++;
                         return;
                     }
                     
                     processedRecords++;
 
-                    // Find row key based on dimensions
+                    // Find row key based on dimensions (using descriptions, not IDs)
                     let rowKey: string | null = null;
                     if (selectedDimensions.length > 0) {
                         const dimValues: string[] = [];
@@ -749,13 +884,8 @@ function OperationalPerformanceContent() {
                         
                         selectedDimensions.forEach(dimName => {
                             try {
-                                // Special handling for dimension ID field names
-                                let idFieldName: string;
-                                if (dimName === 'LineOfBusiness') {
-                                    idFieldName = 'LOBID';
-                                } else {
-                                    idFieldName = dimName + 'ID';
-                                }
+                                // Get the ID field name for this dimension
+                                const idFieldName = getDimensionIdFieldName(dimName);
                                 
                                 const idValue = record[idFieldName];
                                 if (idValue !== undefined && idValue !== null && idValue !== '') {
@@ -763,10 +893,22 @@ function OperationalPerformanceContent() {
                                     const dimTableName = `Dim_${dimName}`;
                                     const dimTableNameUpper = `DIM_${dimName}`;
                                     
-                                    // Try Dim_ first, then DIM_
+                                    // Try alternative names (e.g., LineOfBusiness -> Dim_LOB or DIM_LOB)
+                                    const altNames: string[] = [];
+                                    if (dimName === 'LineOfBusiness') {
+                                        altNames.push('Dim_LOB', 'DIM_LOB');
+                                    }
+                                    
+                                    // Try Dim_ first, then DIM_, then alternatives
                                     let dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableName);
                                     if (!dimRecord) {
                                         dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, dimTableNameUpper);
+                                    }
+                                    if (!dimRecord && altNames.length > 0) {
+                                        for (const altName of altNames) {
+                                            dimRecord = joinFactWithDimension(record, excelData.dimensionTables, idFieldName, altName);
+                                            if (dimRecord) break;
+                                        }
                                     }
                                     if (dimRecord) {
                                         const displayField = Object.keys(dimRecord).find(key => 
@@ -782,7 +924,14 @@ function OperationalPerformanceContent() {
                                             allDimsFound = false;
                                         }
                                     } else {
-                                        dimValues.push(String(idValue));
+                                        // If join failed, try to get description directly from dimension table
+                                        const description = getDimensionDescription(dimName, idValue, excelData.dimensionTables);
+                                        if (description) {
+                                            dimValues.push(description);
+                                        } else {
+                                            // Last resort: use ID value
+                                            dimValues.push(String(idValue));
+                                        }
                                     }
                                 } else {
                                     allDimsFound = false;
@@ -906,7 +1055,7 @@ function OperationalPerformanceContent() {
 
             // Calculate totals and margins
             rowKeys.forEach(rowKey => {
-                availablePeriods.forEach(period => {
+                periodsToUse.forEach(period => {
                     try {
                         if (!data[rowKey] || !data[rowKey][period]) return;
 
@@ -953,7 +1102,7 @@ function OperationalPerformanceContent() {
 
             // Calculate grand totals
             if (rowKeys.includes('Total')) {
-                availablePeriods.forEach(period => {
+                periodsToUse.forEach(period => {
                     try {
                         const totalData: { [key: string]: number } = {};
                         
@@ -988,7 +1137,7 @@ function OperationalPerformanceContent() {
             console.error('Error calculating P&L data:', error);
             return {} as PnLData;
         }
-    }, [excelData, selectedDimensions, availablePeriods, pnlLineItems]);
+    }, [excelData, selectedDimensions, selectedPeriods, availablePeriods, pnlLineItems, dimensionValuesMap]);
 
     const formatCurrency = (value: number): string => {
         if (Math.abs(value) >= 1000000) {
@@ -1009,6 +1158,16 @@ function OperationalPerformanceContent() {
                 return prev.filter(d => d !== dimension);
             } else {
                 return [...prev, dimension];
+            }
+        });
+    };
+
+    const togglePeriod = (period: string) => {
+        setSelectedPeriods(prev => {
+            if (prev.includes(period)) {
+                return prev.filter(p => p !== period);
+            } else {
+                return [...prev, period];
             }
         });
     };
@@ -1118,22 +1277,22 @@ function OperationalPerformanceContent() {
                                 <button
                                     key={dim}
                                     onClick={() => toggleDimension(dim)}
-                                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                                         selectedDimensions.includes(dim)
-                                            ? 'bg-blue-600 text-white'
+                                            ? 'bg-blue-600 text-white shadow-md'
                                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                                     }`}
                                 >
                                     {dim}
                                 </button>
-                    ))}
-                </div>
+                            ))}
+                        </div>
                         {selectedDimensions.length === 0 && (
                             <p className="text-xs text-gray-500 mt-2">No dimensions selected - showing totals only</p>
                         )}
-            </div>
+                    </div>
 
-                    {/* Quarters Info */}
+                    {/* Quarters Selection */}
                     <div className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center space-x-2 mb-3">
                             <BarChart3 className="w-4 h-4 text-gray-600" />
@@ -1141,27 +1300,35 @@ function OperationalPerformanceContent() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {availablePeriods.length > 0 ? (
-                                availablePeriods.map(quarter => (
-                                    <span
-                                        key={quarter}
-                                        className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700"
-                                    >
-                                        {quarter}
-                                    </span>
-                                ))
+                                availablePeriods.map(quarter => {
+                                    const isSelected = selectedPeriods.includes(quarter);
+                                    return (
+                                        <button
+                                            key={quarter}
+                                            onClick={() => togglePeriod(quarter)}
+                                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                                                isSelected
+                                                    ? 'bg-green-500 text-white shadow-md hover:bg-green-600'
+                                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                            }`}
+                                        >
+                                            {quarter}
+                                        </button>
+                                    );
+                                })
                             ) : (
                                 <p className="text-xs text-gray-500">No quarters found in Fact_Margin data</p>
                             )}
-                    </div>
-                        <p className="text-xs text-gray-500 mt-2">
-                            Quarters are displayed as columns in the P&L table below
-                        </p>
+                        </div>
+                        {selectedPeriods.length === 0 && availablePeriods.length > 0 && (
+                            <p className="text-xs text-amber-600 mt-2">Please select at least one quarter to view the report</p>
+                        )}
                     </div>
                 </div>
             </div>
 
             {/* P&L Table */}
-            {availablePeriods.length > 0 && (
+            {selectedPeriods.length > 0 && (
                 <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden">
                     <div className="overflow-x-auto">
                         <table className="w-full">
@@ -1170,7 +1337,7 @@ function OperationalPerformanceContent() {
                                     <th className="text-left py-4 px-6 font-semibold text-gray-900 sticky left-0 bg-gray-50 z-10 min-w-[250px]">
                                         Line Item
                                     </th>
-                                    {availablePeriods.map(period => (
+                                    {selectedPeriods.map(period => (
                                         <th key={period} className="text-right py-4 px-3 font-semibold text-gray-900 min-w-[160px]">
                                             {period}
                                         </th>
@@ -1193,14 +1360,14 @@ function OperationalPerformanceContent() {
                                             }`}>
                                                 {rowKey}
                                             </td>
-                                            {availablePeriods.map((period, periodIdx) => {
+                                            {selectedPeriods.map((period, periodIdx) => {
                                                 const marginValue = pnlData[rowKey]?.[period]?.['Margin'] || 0;
                                                 const marginPctValue = pnlData[rowKey]?.[period]?.['MarginPct'] || 0;
                                                 
                                                 // Calculate trend for margin vs previous quarter
                                                 let trendValue: number | null = null;
                                                 if (periodIdx > 0) {
-                                                    const prevPeriod = availablePeriods[periodIdx - 1];
+                                                    const prevPeriod = selectedPeriods[periodIdx - 1];
                                                     const prevMargin = pnlData[rowKey]?.[prevPeriod]?.['Margin'] || 0;
                                                     if (prevMargin !== 0) {
                                                         trendValue = ((marginValue - prevMargin) / Math.abs(prevMargin)) * 100;
@@ -1294,7 +1461,7 @@ function OperationalPerformanceContent() {
                                                             <span>{displayLabel}</span>
                                                         </div>
                                                     </td>
-                                                    {availablePeriods.map((period, periodIdx) => {
+                                                    {selectedPeriods.map((period, periodIdx) => {
                                                         // Use the item's fieldName - section headers now have fieldNames (TotalRevenue_$mm, TotalExpense_$mm)
                                                         const fieldNameToUse = item.fieldName || (item.combineWithHeader ? item.fieldName : null);
                                                         const value = fieldNameToUse ? (pnlData[rowKey]?.[period]?.[fieldNameToUse] || 0) : 0;
@@ -1305,7 +1472,7 @@ function OperationalPerformanceContent() {
                                                         // Calculate trend vs previous quarter
                                                         let trendValue: number | null = null;
                                                         if (periodIdx > 0 && fieldNameToUse) {
-                                                            const prevPeriod = availablePeriods[periodIdx - 1];
+                                                            const prevPeriod = selectedPeriods[periodIdx - 1];
                                                             const prevValue = pnlData[rowKey]?.[prevPeriod]?.[fieldNameToUse] || 0;
                                                             if (prevValue !== 0) {
                                                                 trendValue = ((value - prevValue) / Math.abs(prevValue)) * 100;
@@ -1357,13 +1524,13 @@ function OperationalPerformanceContent() {
                                         })}
                                         {/* Spacer row */}
                                         <tr>
-                                            <td colSpan={availablePeriods.length + 1} className="py-2"></td>
+                                            <td colSpan={selectedPeriods.length + 1} className="py-2"></td>
                                         </tr>
                                     </React.Fragment>
                                     ))
                                 ) : (
                                     <tr>
-                                        <td colSpan={availablePeriods.length + 1} className="py-8 text-center text-gray-500">
+                                        <td colSpan={selectedPeriods.length + 1} className="py-8 text-center text-gray-500">
                                             No data available. Please check that your Fact_Margin data contains the required fields.
                                         </td>
                                     </tr>
@@ -1377,6 +1544,12 @@ function OperationalPerformanceContent() {
             {availablePeriods.length === 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
                     <p className="text-amber-800 font-medium">No quarters found in Fact_Margin data. Please ensure the 'Quarter' field exists in your Excel file.</p>
+                </div>
+            )}
+
+            {availablePeriods.length > 0 && selectedPeriods.length === 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
+                    <p className="text-amber-800 font-medium">Please select at least one quarter to view the report.</p>
                 </div>
             )}
 
