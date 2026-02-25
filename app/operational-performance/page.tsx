@@ -14,7 +14,7 @@ import {
     ChevronDown,
     ChevronRight
 } from 'lucide-react';
-import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames, FactMarginRecord, NamingConventionRecord } from '@/lib/excel-parser';
+import { ExcelDriverTreeData, joinFactWithDimension, getDimensionTableNames, FactMarginRecord, NamingConventionRecord, DimensionTables, DimensionRecord } from '@/lib/excel-parser';
 import { getCurrentUploadId } from '@/lib/uploadId';
 
 interface PnLLineItem {

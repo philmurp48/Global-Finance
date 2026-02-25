@@ -9,6 +9,7 @@ import { buildNarrationPrompt } from '@/lib/nlq/narrator';
 import { DatasetMetadata } from '@/lib/nlq/types';
 import { formatMetricValue, getMetricLabel } from '@/lib/nlq/format';
 import { getMeasureByKey } from '@/lib/nlq/dictionary';
+import { extractDriverRows, computeDriverTrends, DriverTrend } from '@/lib/driver-trends';
 
 // Rate limiting (in-memory for dev)
 interface RateLimitEntry {
@@ -255,6 +256,82 @@ export async function POST(request: NextRequest) {
         // Build dataset metadata for filter inference
         const metadata = buildDatasetMetadata(dataset.data);
         
+        // Detect driver-related questions
+        const questionLower = question.toLowerCase();
+        const driverKeywords = ['driver', 'drivers', 'best performing driver', 'top driver', 'worst driver', 'driver performance', 'driver trend'];
+        const isDriverQuestion = driverKeywords.some(keyword => questionLower.includes(keyword));
+        
+        // If driver question, compute driver trends
+        if (isDriverQuestion && dataset.data.factMarginRecords && dataset.data.factMarginRecords.length > 0) {
+            // Extract driver rows (those with Level4 or Level5)
+            const driverRows = extractDriverRows(dataset.data.factMarginRecords);
+            
+            if (driverRows.length > 0) {
+                // Determine metric key from question or use default
+                // Try to extract metric from question, fallback to common metrics
+                let metricKey = 'Amount'; // default
+                const metricPatterns = [
+                    { pattern: /amount|revenue|sales/i, key: 'Amount' },
+                    { pattern: /aum|assets under management/i, key: 'AvgAUM_$mm' },
+                    { pattern: /fte|headcount|employees/i, key: 'Headcount_FTE' },
+                    { pattern: /margin/i, key: 'Margin' },
+                ];
+                
+                for (const { pattern, key } of metricPatterns) {
+                    if (pattern.test(question)) {
+                        metricKey = key;
+                        break;
+                    }
+                }
+                
+                // Determine period field
+                const periodField = 'Quarter'; // default, could be 'Period' or 'Date'
+                
+                // Compute driver trends
+                const driverTrends = computeDriverTrends(driverRows, metricKey, periodField, 2);
+                
+                // Get top N drivers (default 10, or extract from question)
+                const topNMatch = question.match(/top\s+(\d+)/i);
+                const topN = topNMatch ? parseInt(topNMatch[1], 10) : 10;
+                const topDrivers = driverTrends.slice(0, topN);
+                
+                // Build deterministic summary
+                const computedSummary = topDrivers.length > 0
+                    ? `Found ${driverTrends.length} drivers. Top ${Math.min(topN, topDrivers.length)} drivers by percent change:`
+                    : 'No driver trends found.';
+                
+                // Format response
+                return NextResponse.json({
+                    summary: computedSummary,
+                    keyFindings: topDrivers.map((dt, idx) => ({
+                        title: `${idx + 1}. ${dt.driverLabel}`,
+                        detail: `${metricKey}: ${dt.latestValue.toLocaleString()} (prior: ${dt.priorValue.toLocaleString()}, change: ${dt.pctChange.toFixed(1)}%)`,
+                        confidence: 95
+                    })),
+                    recommendations: [],
+                    relatedDrivers: topDrivers.map(dt => ({
+                        id: dt.driverId,
+                        label: dt.driverLabel,
+                        value: dt.latestValue,
+                        change: dt.pctChange
+                    })),
+                    visualizations: {},
+                    dataSource: 'Driver Trends Analysis',
+                    lastUpdated: new Date().toISOString(),
+                    query: question,
+                    computedSummary,
+                    topDrivers: topDrivers.map(dt => ({
+                        driverId: dt.driverId,
+                        driverLabel: dt.driverLabel,
+                        latestValue: dt.latestValue,
+                        priorValue: dt.priorValue,
+                        pctChange: dt.pctChange,
+                        recordCount: dt.recordCount
+                    }))
+                });
+            }
+        }
+        
         // Plan query
         const plan = planQuery(question, selectedQuarter, metadata);
         
@@ -263,7 +340,6 @@ export async function POST(request: NextRequest) {
         
         // Execute deterministic aggregation
         // Check if question includes intent words that require extra metrics (driver analysis, root cause, etc.)
-        const questionLower = question.toLowerCase();
         const intentWords = ['driver', 'why', 'explain', 'what drives', 'breakdown of drivers', 'root cause', 'cause', 'drivers of'];
         const includeExtraMetrics = intentWords.some(word => questionLower.includes(word));
         
