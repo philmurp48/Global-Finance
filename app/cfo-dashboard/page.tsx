@@ -20,6 +20,7 @@ import {
     getDimensionTableNames,
     FactMarginRecord,
     DimensionTables,
+    type DimensionRecord,
 } from '@/lib/excel-parser';
 import { getCurrentUploadId } from '@/lib/uploadId';
 import {
@@ -451,9 +452,9 @@ function CFODashboardContent() {
                     dimensionTables: new Map(
                         Object.entries(d.dimensionTables || {}).map(([k, v]) => [
                             k,
-                            new Map(Object.entries((v as Record<string, unknown>) || {})),
+                            new Map(Object.entries((v as Record<string, DimensionRecord>) || {})) as Map<string, DimensionRecord>,
                         ])
-                    ),
+                    ) as DimensionTables,
                     namingConventionRecords: d.namingConventionRecords || [],
                 };
                 setExcelData(restored);
@@ -509,7 +510,7 @@ function CFODashboardContent() {
                 }
             }
             if (!map[dimName] && excelData.factMarginRecords.length) {
-                const idField = idToDim[dimName] ? Object.entries(idToDim).find(([, v]) => v === dimName)?.[0] : `${dimName}ID`;
+                const idField: string = Object.entries(idToDim).find(([, v]) => v === dimName)?.[0] ?? `${dimName}ID`;
                 const descField = descFieldByDim[dimName] || dimName;
                 const seen = new Map<string, string>();
                 excelData.factMarginRecords.forEach((r: FactMarginRecord) => {

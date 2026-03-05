@@ -36,7 +36,6 @@ const fieldNameMapping: Record<string, string> = {
     'AUM_$mm': 'Assets Under Management',
     'ApplicationSpend_$mm': 'Application Spend',
     'TxnFeeRate_bps': 'Rev Transaction Fees',
-    'AUM_$mm': 'AUM',
     'CashBalances_$mm': 'Cash Balance',
     'NIM_bps_annual': 'NIM',
     'MarketReturn_pct': 'Market Return Percent',
@@ -1078,8 +1077,8 @@ export default function ScenarioModelingPage() {
                         data[period][varCompField] = varVal * (1 + headcountChange / 100);
                     }
                     if (totalCompField) {
-                        const newBase = data[period][baseCompField] ?? 0;
-                        const newVar = data[period][varCompField] ?? 0;
+                        const newBase = baseCompField != null ? (data[period][baseCompField] ?? 0) : 0;
+                        const newVar = varCompField != null ? (data[period][varCompField] ?? 0) : 0;
                         data[period][totalCompField] = newBase + newVar;
                     }
                 } else if (totalCompField) {
