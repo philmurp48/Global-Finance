@@ -230,6 +230,12 @@ export default function ManagementReportingLayout({
             subItems: []
         },
         {
+            title: 'CFO Dashboard',
+            href: '/cfo-dashboard',
+            icon: FileText,
+            subItems: []
+        },
+        {
             title: 'Scenario Modeling',
             href: '/scenario-modeling',
             icon: TrendingUp,

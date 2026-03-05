@@ -31,6 +31,10 @@ interface ScenarioLever {
 // Mapping table: Fact_Margin Field Name -> Report Field Name
 const fieldNameMapping: Record<string, string> = {
     'TradingVolume_$mm': 'Trading Volume',
+    'NetFlows_$mm': 'Net Flows',
+    'AssetsUnderManagement_$mm': 'Assets Under Management',
+    'AUM_$mm': 'Assets Under Management',
+    'ApplicationSpend_$mm': 'Application Spend',
     'TxnFeeRate_bps': 'Rev Transaction Fees',
     'AUM_$mm': 'AUM',
     'CashBalances_$mm': 'Cash Balance',
@@ -232,10 +236,10 @@ export default function ScenarioModelingPage() {
     
     // Scenario levers based on new structure
     const [leverValues, setLeverValues] = useState<Record<string, number>>({
-        AvgAUM: 0,
-        TradingVolume: 0,
-        HeadcountFTE: 0,
-        AcquisitionCostPerClient: 0
+        AssetsUnderManagement: 0,
+        NetFlows: 0,
+        Headcount: 0,
+        ApplicationSpend: 0
     });
 
     // Load Excel data on mount
@@ -633,10 +637,10 @@ export default function ScenarioModelingPage() {
     // Match lever name to "Report Naming" column, get impacted field from "Lever Impact" column
     const leverToFieldMapping = useMemo(() => {
         const mapping: Record<string, string[]> = {
-            'Avg AUM': [],
-            'Trading Volume': [],
-            'Headcount FTE': [],
-            'Acquisition Cost Per Client': []
+            'Assets Under Management': [],
+            'Net Flows': [],
+            'Headcount': [],
+            'Application Spend': []
         };
 
         if (!excelData?.namingConventionRecords || excelData.namingConventionRecords.length === 0) {
@@ -683,19 +687,19 @@ export default function ScenarioModelingPage() {
             // Normalize lever name for matching
             const reportNamingLower = reportNaming.toLowerCase().trim();
             
-            // Match to lever names
-            if (reportNamingLower === 'avg aum' || reportNamingLower.includes('avg aum') || reportNamingLower === 'aum') {
-                mapping['Avg AUM'].push(leverImpact);
-                console.log(`Mapped lever "Avg AUM" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
-            } else if (reportNamingLower === 'trading volume' || reportNamingLower.includes('trading volume') || reportNamingLower === 'tradingvolume') {
-                mapping['Trading Volume'].push(leverImpact);
-                console.log(`Mapped lever "Trading Volume" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
-            } else if (reportNamingLower === 'headcount fte' || reportNamingLower.includes('headcount fte') || reportNamingLower === 'headcount' || reportNamingLower === 'fte') {
-                mapping['Headcount FTE'].push(leverImpact);
-                console.log(`Mapped lever "Headcount FTE" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
-            } else if (reportNamingLower === 'acquisition cost per client' || reportNamingLower.includes('acquisition cost per client') || reportNamingLower.includes('acquisition cost') || reportNamingLower === 'acquisition') {
-                mapping['Acquisition Cost Per Client'].push(leverImpact);
-                console.log(`Mapped lever "Acquisition Cost Per Client" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
+            // Match to lever names (include legacy names for backward compatibility with Excel)
+            if (reportNamingLower === 'assets under management' || reportNamingLower.includes('assets under management') || reportNamingLower === 'avg aum' || reportNamingLower.includes('avg aum') || reportNamingLower === 'aum') {
+                mapping['Assets Under Management'].push(leverImpact);
+                console.log(`Mapped lever "Assets Under Management" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
+            } else if (reportNamingLower === 'net flows' || reportNamingLower.includes('net flows') || reportNamingLower === 'trading volume' || reportNamingLower.includes('trading volume') || reportNamingLower === 'tradingvolume') {
+                mapping['Net Flows'].push(leverImpact);
+                console.log(`Mapped lever "Net Flows" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
+            } else if (reportNamingLower === 'headcount' || reportNamingLower.includes('headcount') || reportNamingLower === 'headcount fte' || reportNamingLower.includes('headcount fte') || reportNamingLower === 'fte') {
+                mapping['Headcount'].push(leverImpact);
+                console.log(`Mapped lever "Headcount" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
+            } else if (reportNamingLower === 'application spend' || reportNamingLower.includes('application spend') || reportNamingLower === 'acquisition cost per client' || reportNamingLower.includes('acquisition cost per client') || reportNamingLower.includes('acquisition cost') || reportNamingLower === 'acquisition') {
+                mapping['Application Spend'].push(leverImpact);
+                console.log(`Mapped lever "Application Spend" (Report Naming: "${reportNaming}") to impacted field "${leverImpact}"`);
             }
         });
 
@@ -708,10 +712,10 @@ export default function ScenarioModelingPage() {
     const impactPercentages = useMemo(() => {
         if (!excelData || !excelData.factMarginRecords || excelData.factMarginRecords.length === 0) {
             return {
-                AvgAUM: {} as Record<string, number>, // Map of P&L field -> impact %
-                TradingVolume: {} as Record<string, number>,
-                HeadcountFTE: {} as Record<string, number>,
-                AcquisitionCostPerClient: {} as Record<string, number>
+                AssetsUnderManagement: {} as Record<string, number>, // Map of P&L field -> impact %
+                NetFlows: {} as Record<string, number>,
+                Headcount: {} as Record<string, number>,
+                ApplicationSpend: {} as Record<string, number>
             };
         }
 
@@ -726,23 +730,23 @@ export default function ScenarioModelingPage() {
 
         // Initialize impact maps
         const impacts: {
-            AvgAUM: Record<string, number>;
-            TradingVolume: Record<string, number>;
-            HeadcountFTE: Record<string, number>;
-            AcquisitionCostPerClient: Record<string, number>;
+            AssetsUnderManagement: Record<string, number>;
+            NetFlows: Record<string, number>;
+            Headcount: Record<string, number>;
+            ApplicationSpend: Record<string, number>;
         } = {
-            AvgAUM: {},
-            TradingVolume: {},
-            HeadcountFTE: {},
-            AcquisitionCostPerClient: {}
+            AssetsUnderManagement: {},
+            NetFlows: {},
+            Headcount: {},
+            ApplicationSpend: {}
         };
 
         // Initialize sums for correlation calculation
         const leverSums: Record<string, number> = {
-            AvgAUM: 0,
-            TradingVolume: 0,
-            HeadcountFTE: 0,
-            AcquisitionCostPerClient: 0
+            AssetsUnderManagement: 0,
+            NetFlows: 0,
+            Headcount: 0,
+            ApplicationSpend: 0
         };
 
         const fieldSums: Record<string, number> = {};
@@ -764,11 +768,11 @@ export default function ScenarioModelingPage() {
         excelData.factMarginRecords.forEach(record => {
             if (!record) return;
 
-            // Get lever values
-            const avgAUM = getFieldValue(record, 'Avg AUM') || getFieldValue(record, 'AUM_$mm') || getFieldValue(record, 'AUM');
-            const tradingVolume = getFieldValue(record, 'Trading Volume') || getFieldValue(record, 'TradingVolume_$mm') || getFieldValue(record, 'TradingVolume');
-            const headcountFTE = getFieldValue(record, 'Headcount FTE') || getFieldValue(record, 'Headcount_FTE') || getFieldValue(record, 'Headcount');
-            const acquisitionCostPerClient = getFieldValue(record, 'Acquisition Cost Per Client') || getFieldValue(record, 'AcquisitionCostPerClient') || getFieldValue(record, 'ClientAcquisitionSpend');
+            // Get lever values (Assets Under Management, Net Flows, Headcount, Application Spend)
+            const assetsUnderManagement = getFieldValue(record, 'Assets Under Management') || getFieldValue(record, 'AssetsUnderManagement_$mm') || getFieldValue(record, 'AUM_$mm') || getFieldValue(record, 'AUM');
+            const netFlows = getFieldValue(record, 'Net Flows') || getFieldValue(record, 'NetFlows_$mm') || getFieldValue(record, 'TradingVolume_$mm') || getFieldValue(record, 'TradingVolume');
+            const headcount = getFieldValue(record, 'Headcount') || getFieldValue(record, 'Headcount_FTE') || getFieldValue(record, 'Headcount');
+            const applicationSpend = getFieldValue(record, 'Application Spend') || getFieldValue(record, 'ApplicationSpend_$mm') || getFieldValue(record, 'AcquisitionCostPerClient') || getFieldValue(record, 'Exp_TechData_$mm');
 
             // Get P&L field values
             const plFieldValues: Record<string, number> = {};
@@ -780,38 +784,38 @@ export default function ScenarioModelingPage() {
             });
 
             // Accumulate sums
-            if (avgAUM !== null && !isNaN(avgAUM) && avgAUM !== 0) {
-                leverSums.AvgAUM += avgAUM;
+            if (assetsUnderManagement !== null && !isNaN(assetsUnderManagement) && assetsUnderManagement !== 0) {
+                leverSums.AssetsUnderManagement += assetsUnderManagement;
                 plFields.forEach(field => {
                     if (plFieldValues[field] !== undefined) {
-                        leverFieldSums.AvgAUM[field] += avgAUM * plFieldValues[field];
+                        leverFieldSums.AssetsUnderManagement[field] += assetsUnderManagement * plFieldValues[field];
                     }
                 });
             }
 
-            if (tradingVolume !== null && !isNaN(tradingVolume) && tradingVolume !== 0) {
-                leverSums.TradingVolume += tradingVolume;
+            if (netFlows !== null && !isNaN(netFlows) && netFlows !== 0) {
+                leverSums.NetFlows += netFlows;
                 plFields.forEach(field => {
                     if (plFieldValues[field] !== undefined) {
-                        leverFieldSums.TradingVolume[field] += tradingVolume * plFieldValues[field];
+                        leverFieldSums.NetFlows[field] += netFlows * plFieldValues[field];
                     }
                 });
             }
 
-            if (headcountFTE !== null && !isNaN(headcountFTE) && headcountFTE !== 0) {
-                leverSums.HeadcountFTE += headcountFTE;
+            if (headcount !== null && !isNaN(headcount) && headcount !== 0) {
+                leverSums.Headcount += headcount;
                 plFields.forEach(field => {
                     if (plFieldValues[field] !== undefined) {
-                        leverFieldSums.HeadcountFTE[field] += headcountFTE * plFieldValues[field];
+                        leverFieldSums.Headcount[field] += headcount * plFieldValues[field];
                     }
                 });
             }
 
-            if (acquisitionCostPerClient !== null && !isNaN(acquisitionCostPerClient) && acquisitionCostPerClient !== 0) {
-                leverSums.AcquisitionCostPerClient += acquisitionCostPerClient;
+            if (applicationSpend !== null && !isNaN(applicationSpend) && applicationSpend !== 0) {
+                leverSums.ApplicationSpend += applicationSpend;
                 plFields.forEach(field => {
                     if (plFieldValues[field] !== undefined) {
-                        leverFieldSums.AcquisitionCostPerClient[field] += acquisitionCostPerClient * plFieldValues[field];
+                        leverFieldSums.ApplicationSpend[field] += applicationSpend * plFieldValues[field];
                     }
                 });
             }
@@ -828,10 +832,10 @@ export default function ScenarioModelingPage() {
         // Calculate impact percentages from actuals data
         // For each lever, calculate the sensitivity to each impacted field based on actuals
         Object.keys(leverSums).forEach(lever => {
-            const leverName = lever === 'AvgAUM' ? 'Avg AUM' :
-                             lever === 'TradingVolume' ? 'Trading Volume' :
-                             lever === 'HeadcountFTE' ? 'Headcount FTE' :
-                             lever === 'AcquisitionCostPerClient' ? 'Acquisition Cost Per Client' : '';
+            const leverName = lever === 'AssetsUnderManagement' ? 'Assets Under Management' :
+                             lever === 'NetFlows' ? 'Net Flows' :
+                             lever === 'Headcount' ? 'Headcount' :
+                             lever === 'ApplicationSpend' ? 'Application Spend' : '';
             
             const mappedFields = leverToFieldMapping[leverName] || [];
             
@@ -995,194 +999,142 @@ export default function ScenarioModelingPage() {
             data[period] = { ...baseData };
 
             // Apply lever impacts to all affected P&L fields based on calculated impact percentages
-            // Level 1: Avg AUM
-            const avgAUMChange = leverValues.AvgAUM || 0;
-            if (avgAUMChange !== 0) {
-                console.log(`Applying Avg AUM lever change: ${avgAUMChange}%`);
-                console.log(`Available impact percentages for AvgAUM:`, impactPercentages.AvgAUM);
-                if (impactPercentages.AvgAUM && Object.keys(impactPercentages.AvgAUM).length > 0) {
-                    Object.keys(impactPercentages.AvgAUM).forEach(field => {
-                        const impactPercent = impactPercentages.AvgAUM[field] || 0;
+            // Level 1: Assets Under Management
+            const assetsUnderManagementChange = leverValues.AssetsUnderManagement || 0;
+            if (assetsUnderManagementChange !== 0) {
+                console.log(`Applying Assets Under Management lever change: ${assetsUnderManagementChange}%`);
+                console.log(`Available impact percentages for AssetsUnderManagement:`, impactPercentages.AssetsUnderManagement);
+                if (impactPercentages.AssetsUnderManagement && Object.keys(impactPercentages.AssetsUnderManagement).length > 0) {
+                    Object.keys(impactPercentages.AssetsUnderManagement).forEach(field => {
+                        const impactPercent = impactPercentages.AssetsUnderManagement[field] || 0;
                         if (impactPercent !== 0) {
                             const baseValue = baseData[field] || 0;
                             // Impact = baseValue * (leverChange / 100) * impactPercent
-                            // impactPercent represents: 1% lever change = impactPercent% field change
-                            // So if impactPercent = 1.0, then 1% lever change = 1% field change
-                            const impact = baseValue * (avgAUMChange / 100) * impactPercent;
+                            const impact = baseValue * (assetsUnderManagementChange / 100) * impactPercent;
                             const newValue = (data[period][field] || baseValue) + impact;
                             data[period][field] = newValue;
-                            console.log(`Avg AUM lever: ${avgAUMChange}% change, field ${field}: ${baseValue} -> ${newValue} (impact: ${impact})`);
+                            console.log(`Assets Under Management lever: ${assetsUnderManagementChange}% change, field ${field}: ${baseValue} -> ${newValue} (impact: ${impact})`);
                         }
                     });
                 } else {
-                    console.warn(`No impact percentages found for AvgAUM lever. Lever to field mapping:`, leverToFieldMapping);
+                    console.warn(`No impact percentages found for AssetsUnderManagement lever. Lever to field mapping:`, leverToFieldMapping);
                 }
             }
 
-            // Level 2: Trading Volume
-            const tradingVolumeChange = leverValues.TradingVolume || 0;
-            if (tradingVolumeChange !== 0 && impactPercentages.TradingVolume) {
-                Object.keys(impactPercentages.TradingVolume).forEach(field => {
-                    const impactPercent = impactPercentages.TradingVolume[field] || 0;
+            // Level 2: Net Flows
+            const netFlowsChange = leverValues.NetFlows || 0;
+            if (netFlowsChange !== 0 && impactPercentages.NetFlows) {
+                Object.keys(impactPercentages.NetFlows).forEach(field => {
+                    const impactPercent = impactPercentages.NetFlows[field] || 0;
                     if (impactPercent !== 0) {
                         const baseValue = baseData[field] || 0;
-                        const impact = baseValue * (tradingVolumeChange / 100) * impactPercent;
+                        const impact = baseValue * (netFlowsChange / 100) * impactPercent;
                         data[period][field] = (data[period][field] || baseValue) + impact;
                     }
                 });
             }
 
-            // Level 3: Headcount FTE
-            // Headcount FTE only affects Total Compensation, which then proportionally affects Total Expenses and Margin
-            const headcountFTEChange = leverValues.HeadcountFTE || 0;
-            if (headcountFTEChange !== 0) {
-                // Find Total Compensation field (could be TotalCompensation_$mm or Exp_CompBenefits_$mm)
-                let totalCompensationField: string | null = null;
-                const possibleFields = ['TotalCompensation_$mm', 'Exp_CompBenefits_$mm', 'TotalCompensation', 'Exp_CompBenefits'];
-                
-                for (const field of possibleFields) {
-                    if (baseData[field] !== undefined && baseData[field] !== null) {
-                        totalCompensationField = field;
-                        break;
-                    }
+            // Level 3: Headcount
+            // Headcount changes Base Compensation (and Variable if present), which rolls up to Compensation → Expenses → Operating Margin
+            const headcountChange = leverValues.Headcount || 0;
+            if (headcountChange !== 0) {
+                const baseCompFields = ['BaseCompensation_$mm', 'Base Compensation', 'BaseCompensation'];
+                const varCompFields = ['VariableCompensation_$mm', 'Variable Compensation', 'VariableCompensation'];
+                const totalCompFields = ['TotalCompensation_$mm', 'Exp_CompBenefits_$mm', 'TotalCompensation', 'Exp_CompBenefits'];
+                let baseCompField: string | null = null;
+                let varCompField: string | null = null;
+                let totalCompField: string | null = null;
+                for (const f of baseCompFields) {
+                    if (baseData[f] !== undefined && baseData[f] !== null) { baseCompField = f; break; }
                 }
-                
-                // Also check in pnlLineItems for the field name
-                if (!totalCompensationField) {
-                    const compItem = pnlLineItems.find(item => 
-                        item.fieldName && (
-                            item.fieldName.toLowerCase().includes('totalcompensation') ||
-                            item.fieldName.toLowerCase().includes('exp_compbenefits')
-                        )
+                for (const f of varCompFields) {
+                    if (baseData[f] !== undefined && baseData[f] !== null) { varCompField = f; break; }
+                }
+                for (const f of totalCompFields) {
+                    if (baseData[f] !== undefined && baseData[f] !== null) { totalCompField = f; break; }
+                }
+                if (!baseCompField) {
+                    const item = pnlLineItems.find(i => i.fieldName && i.fieldName.toLowerCase().includes('basecompensation'));
+                    if (item?.fieldName) baseCompField = item.fieldName;
+                }
+                if (!varCompField) {
+                    const item = pnlLineItems.find(i => i.fieldName && i.fieldName.toLowerCase().includes('variablecompensation'));
+                    if (item?.fieldName) varCompField = item.fieldName;
+                }
+                if (!totalCompField) {
+                    const compItem = pnlLineItems.find(item =>
+                        item.fieldName && (item.fieldName.toLowerCase().includes('totalcompensation') || item.fieldName.toLowerCase().includes('exp_compbenefits'))
                     );
-                    if (compItem && compItem.fieldName) {
-                        totalCompensationField = compItem.fieldName;
-                    }
+                    if (compItem?.fieldName) totalCompField = compItem.fieldName;
                 }
-                
-                if (totalCompensationField && baseData[totalCompensationField] !== undefined) {
-                    const baseTotalCompensation = baseData[totalCompensationField] || 0;
-                    
-                    // Apply Headcount FTE change directly to Total Compensation (1:1 relationship)
-                    // If Headcount FTE increases by X%, Total Compensation increases by X%
-                    const totalCompensationChange = baseTotalCompensation * (headcountFTEChange / 100);
-                    const newTotalCompensation = baseTotalCompensation + totalCompensationChange;
-                    data[period][totalCompensationField] = newTotalCompensation;
-                    
-                    // Calculate the proportional change percentage in Total Compensation
-                    const totalCompensationChangePercent = baseTotalCompensation !== 0 
-                        ? (totalCompensationChange / baseTotalCompensation) * 100 
-                        : headcountFTEChange;
-                    
-                    // Apply the same proportional change to ALL expenses (proportionally adjust Total Expenses)
-                    // Store this for later application in the totals recalculation
-                    data[period]['_headcountExpenseChangePercent'] = totalCompensationChangePercent;
+                // Apply Headcount % to Base Compensation and Variable Compensation when present; then roll up to Total Compensation
+                if (baseCompField || varCompField) {
+                    if (baseCompField) {
+                        const baseVal = data[period][baseCompField] ?? baseData[baseCompField] ?? 0;
+                        data[period][baseCompField] = baseVal * (1 + headcountChange / 100);
+                    }
+                    if (varCompField) {
+                        const varVal = data[period][varCompField] ?? baseData[varCompField] ?? 0;
+                        data[period][varCompField] = varVal * (1 + headcountChange / 100);
+                    }
+                    if (totalCompField) {
+                        const newBase = data[period][baseCompField] ?? 0;
+                        const newVar = data[period][varCompField] ?? 0;
+                        data[period][totalCompField] = newBase + newVar;
+                    }
+                } else if (totalCompField) {
+                    const baseTotalComp = baseData[totalCompField] ?? 0;
+                    data[period][totalCompField] = baseTotalComp * (1 + headcountChange / 100);
                 }
             }
 
-            // Level 4: Acquisition Cost Per Client
-            const acquisitionCostChange = leverValues.AcquisitionCostPerClient || 0;
-            if (acquisitionCostChange !== 0 && impactPercentages.AcquisitionCostPerClient) {
-                Object.keys(impactPercentages.AcquisitionCostPerClient).forEach(field => {
-                    const impactPercent = impactPercentages.AcquisitionCostPerClient[field] || 0;
+            // Level 4: Application Spend
+            const applicationSpendChange = leverValues.ApplicationSpend || 0;
+            if (applicationSpendChange !== 0 && impactPercentages.ApplicationSpend) {
+                Object.keys(impactPercentages.ApplicationSpend).forEach(field => {
+                    const impactPercent = impactPercentages.ApplicationSpend[field] || 0;
                     if (impactPercent !== 0) {
                         const baseValue = baseData[field] || 0;
-                        const impact = baseValue * (acquisitionCostChange / 100) * impactPercent;
+                        const impact = baseValue * (applicationSpendChange / 100) * impactPercent;
                         data[period][field] = (data[period][field] || baseValue) + impact;
                     }
                 });
             }
 
-            // Recalculate totals after applying lever impacts
-            // Start with base totals and add impacts from detail items
-            const baseTotalRevenue = baseData['TotalRevenue_$mm'] || 0;
-            const baseTotalExpense = baseData['TotalExpense_$mm'] || 0;
-            
-            // Calculate impact on totals by summing changes to detail items
-            let revenueImpact = 0;
-            let expenseImpact = 0;
-            
-            // Sum impacts to revenue detail items
-            let inRevenueSection = false;
+            // Recalculate parent totals from detail line items so changes propagate: Revenue, Expenses, Margin, MarginPct
+            // Collect every detail field under Revenue and under Expenses (section = by order: Revenue header then Expenses header)
+            const revenueDetailFields: string[] = [];
+            const expenseDetailFields: string[] = [];
+            let currentSection: 'revenue' | 'expense' | null = null;
+            const fnLower = (s: string) => (s || '').toLowerCase();
             pnlLineItems.forEach(item => {
-                if (item.label === 'Revenue' && item.fieldName === 'TotalRevenue_$mm') {
-                    inRevenueSection = true;
-                } else if (item.label === 'Expenses' && item.fieldName === 'TotalExpense_$mm') {
-                    inRevenueSection = false;
-                } else if (inRevenueSection && item.fieldName && !item.isTotal && item.indent === 2) {
-                    // This is a revenue detail item - calculate impact
-                    const baseValue = baseData[item.fieldName] || 0;
-                    const newValue = data[period][item.fieldName] || 0;
-                    revenueImpact += (newValue - baseValue);
+                const fn = item.fieldName;
+                if (!fn) return;
+                if (fnLower(fn) === 'totalrevenue_$mm') {
+                    currentSection = 'revenue';
+                    return;
                 }
+                if (fnLower(fn) === 'totalexpense_$mm') {
+                    currentSection = 'expense';
+                    return;
+                }
+                if (fnLower(fn) === 'margin_$mm' || fnLower(fn) === 'marginpct') return;
+                if (currentSection === 'revenue') revenueDetailFields.push(fn);
+                if (currentSection === 'expense') expenseDetailFields.push(fn);
             });
-            
-            // Sum impacts to expense detail items (excluding Total Compensation which is handled separately)
-            let inExpenseSection = false;
-            let totalCompensationFieldName: string | null = null;
-            
-            // Find Total Compensation field name to exclude it from detail sum
-            const possibleCompFields = ['TotalCompensation_$mm', 'Exp_CompBenefits_$mm', 'TotalCompensation', 'Exp_CompBenefits'];
-            for (const field of possibleCompFields) {
-                if (baseData[field] !== undefined && baseData[field] !== null) {
-                    totalCompensationFieldName = field;
-                    break;
-                }
-            }
-            if (!totalCompensationFieldName) {
-                const compItem = pnlLineItems.find(item => 
-                    item.fieldName && (
-                        item.fieldName.toLowerCase().includes('totalcompensation') ||
-                        item.fieldName.toLowerCase().includes('exp_compbenefits')
-                    )
-                );
-                if (compItem && compItem.fieldName) {
-                    totalCompensationFieldName = compItem.fieldName;
-                }
-            }
-            
-            pnlLineItems.forEach(item => {
-                if (item.label === 'Expenses' && item.fieldName === 'TotalExpense_$mm') {
-                    inExpenseSection = true;
-                } else if (inExpenseSection && item.fieldName && !item.isTotal && (item.indent === 1 || item.indent === 2)) {
-                    // Exclude Total Compensation from detail sum - it's handled via proportional adjustment
-                    if (totalCompensationFieldName && item.fieldName.toLowerCase() === totalCompensationFieldName.toLowerCase()) {
-                        return; // Skip Total Compensation
-                    }
-                    // This is an expense detail item - calculate impact
-                    const baseValue = baseData[item.fieldName] || 0;
-                    const newValue = data[period][item.fieldName] || 0;
-                    expenseImpact += (newValue - baseValue);
-                }
-            });
-            
-            // Apply Headcount FTE proportional impact on Total Expenses
-            // If Headcount FTE changed Total Compensation by X%, proportionally adjust Total Expenses by X%
-            if (data[period]['_headcountExpenseChangePercent'] !== undefined) {
-                const expenseChangePercent = data[period]['_headcountExpenseChangePercent'];
-                // Apply proportional change to Total Expenses (this includes the Total Compensation change)
-                const proportionalExpenseChange = baseTotalExpense * (expenseChangePercent / 100);
-                expenseImpact += proportionalExpenseChange;
-                // Clean up the temporary field
-                delete data[period]['_headcountExpenseChangePercent'];
-            }
-            
-            // Apply impacts to totals
-            data[period]['TotalRevenue_$mm'] = baseTotalRevenue + revenueImpact;
-            data[period]['TotalExpense_$mm'] = baseTotalExpense + expenseImpact;
-            
-            // Use base Margin_$mm from Fact_Margin and adjust for impacts
-            const baseMargin = baseData['Margin_$mm'] || baseData['Margin'] || 0;
-            
-            // Calculate the impact on margin from revenue and expense impacts
-            const marginImpact = revenueImpact - expenseImpact;
-            const finalMargin = baseMargin + marginImpact;
+            let sumRevenue = 0;
+            revenueDetailFields.forEach(f => { sumRevenue += (data[period][f] ?? 0); });
+            let sumExpense = 0;
+            expenseDetailFields.forEach(f => { sumExpense += (data[period][f] ?? 0); });
+            // Set totals from rolled-up details when we have details, so Headcount/Application Spend changes propagate
+            if (revenueDetailFields.length > 0) data[period]['TotalRevenue_$mm'] = sumRevenue;
+            if (expenseDetailFields.length > 0) data[period]['TotalExpense_$mm'] = sumExpense;
+            const finalRevenue = data[period]['TotalRevenue_$mm'] ?? 0;
+            const finalExpense = data[period]['TotalExpense_$mm'] ?? 0;
+            const finalMargin = finalRevenue - finalExpense;
             data[period]['Margin'] = finalMargin;
-            data[period]['Margin_$mm'] = finalMargin; // Also set Margin_$mm for consistency
-            
-            // MarginPct should be recalculated based on new margin and revenue
-            const finalTotalRevenue = data[period]['TotalRevenue_$mm'] || 0;
-            data[period]['MarginPct'] = finalTotalRevenue !== 0 ? (finalMargin / finalTotalRevenue) * 100 : 0;
+            data[period]['Margin_$mm'] = finalMargin;
+            data[period]['MarginPct'] = finalRevenue !== 0 ? (finalMargin / finalRevenue) * 100 : 0;
         });
 
         return data;
@@ -1191,11 +1143,11 @@ export default function ScenarioModelingPage() {
     // Scenario levers configuration - New structure with 4 levels
     const scenarioLevers: ScenarioLever[] = [
         {
-            id: 'AvgAUM',
-            name: 'Avg AUM',
-            factMarginFieldName: 'Avg AUM',
-            reportFieldName: 'Avg AUM',
-            currentValue: leverValues.AvgAUM || 0,
+            id: 'AssetsUnderManagement',
+            name: 'Assets Under Management',
+            factMarginFieldName: 'Assets Under Management',
+            reportFieldName: 'Assets Under Management',
+            currentValue: leverValues.AssetsUnderManagement || 0,
             minValue: -50,
             maxValue: 50,
             unit: '%',
@@ -1203,11 +1155,11 @@ export default function ScenarioModelingPage() {
             affectsTotal: 'Multiple'
         },
         {
-            id: 'TradingVolume',
-            name: 'Trading Volume',
-            factMarginFieldName: 'Trading Volume',
-            reportFieldName: 'Trading Volume',
-            currentValue: leverValues.TradingVolume || 0,
+            id: 'NetFlows',
+            name: 'Net Flows',
+            factMarginFieldName: 'Net Flows',
+            reportFieldName: 'Net Flows',
+            currentValue: leverValues.NetFlows || 0,
             minValue: -50,
             maxValue: 50,
             unit: '%',
@@ -1215,11 +1167,11 @@ export default function ScenarioModelingPage() {
             affectsTotal: 'Multiple'
         },
         {
-            id: 'HeadcountFTE',
-            name: 'Headcount FTE',
-            factMarginFieldName: 'Headcount FTE',
-            reportFieldName: 'Headcount FTE',
-            currentValue: leverValues.HeadcountFTE || 0,
+            id: 'Headcount',
+            name: 'Headcount',
+            factMarginFieldName: 'Headcount',
+            reportFieldName: 'Headcount',
+            currentValue: leverValues.Headcount || 0,
             minValue: -50,
             maxValue: 50,
             unit: '%',
@@ -1227,11 +1179,11 @@ export default function ScenarioModelingPage() {
             affectsTotal: 'Multiple'
         },
         {
-            id: 'AcquisitionCostPerClient',
-            name: 'Acquisition Cost Per Client',
-            factMarginFieldName: 'Acquisition Cost Per Client',
-            reportFieldName: 'Acquisition Cost Per Client',
-            currentValue: leverValues.AcquisitionCostPerClient || 0,
+            id: 'ApplicationSpend',
+            name: 'Application Spend',
+            factMarginFieldName: 'Application Spend',
+            reportFieldName: 'Application Spend',
+            currentValue: leverValues.ApplicationSpend || 0,
             minValue: -50,
             maxValue: 50,
             unit: '%',
@@ -1474,10 +1426,10 @@ export default function ScenarioModelingPage() {
                 
                 // Check each lever and its impacted fields
                 Object.keys(leverToFieldMapping).forEach(leverName => {
-                    const leverId = leverName === 'Avg AUM' ? 'AvgAUM' :
-                                   leverName === 'Trading Volume' ? 'TradingVolume' :
-                                   leverName === 'Headcount FTE' ? 'HeadcountFTE' :
-                                   leverName === 'Acquisition Cost Per Client' ? 'AcquisitionCostPerClient' : '';
+                    const leverId = leverName === 'Assets Under Management' ? 'AssetsUnderManagement' :
+                                   leverName === 'Net Flows' ? 'NetFlows' :
+                                   leverName === 'Headcount' ? 'Headcount' :
+                                   leverName === 'Application Spend' ? 'ApplicationSpend' : '';
                     
                     if (!leverId) return;
                     
@@ -1487,7 +1439,7 @@ export default function ScenarioModelingPage() {
                     // Get impacted fields for this lever
                     const impactedFields = leverToFieldMapping[leverName] || [];
                     
-                    // Check if this node is the lever field itself (e.g., "Avg AUM")
+                    // Check if this node is the lever field itself (e.g., "Assets Under Management")
                     const leverFieldName = leverName; // Use lever name directly
                     const leverFieldNormalized = normalizeFieldName(leverFieldName);
                     const isLeverField = nodeNameNormalized === leverFieldNormalized ||
@@ -1544,7 +1496,27 @@ export default function ScenarioModelingPage() {
 
         applyLeverImpacts(excelData.tree);
 
-        // No roll-up needed - all values come directly from Fact_Margin
+        // Roll up: parent = sum of children so Headcount/Application Spend propagate to levels above
+        const rollUpFromChildren = (nodes: DriverTreeNode[]) => {
+            nodes.forEach(node => {
+                if (node.children && node.children.length > 0) {
+                    rollUpFromChildren(node.children);
+                    const nodeData = data.get(node.id);
+                    if (nodeData) {
+                        periodsToProcess.forEach(period => {
+                            const normalizedPeriod = String(period).trim();
+                            let sum = 0;
+                            node.children!.forEach(child => {
+                                const childData = data.get(child.id);
+                                if (childData) sum += childData.get(normalizedPeriod) || 0;
+                            });
+                            nodeData.set(normalizedPeriod, sum);
+                        });
+                    }
+                }
+            });
+        };
+        rollUpFromChildren(excelData.tree);
 
         return data;
     }, [baseDriverTreeData, leverValues, excelData, selectedPeriods, availablePeriods, leverToFieldMapping, impactPercentages]);
@@ -1653,26 +1625,52 @@ export default function ScenarioModelingPage() {
                                     const marginChangeColor = getChangeColor(baseMargin, margin, true);
                                     const marginPctChangeColor = getChangeColor(baseMarginPct, marginPct, true);
                                     
+                                    const marginChange = margin - baseMargin;
+                                    const marginPctChange = marginPct - baseMarginPct;
                                     return (
                                         <div key={period} className="text-right min-w-[110px] max-w-[110px] px-1.5 flex-shrink-0">
                                             <div className={`text-sm font-bold whitespace-nowrap ${marginChangeColor}`}>
                                                 {formatCurrency(margin)}
                                             </div>
+                                            {marginChange !== 0 && (
+                                                <div className={`text-xs font-medium ${marginChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {marginChange >= 0 ? '+' : ''}{formatCurrency(marginChange)} ({marginChange >= 0 ? '+' : ''}{Math.abs(baseMargin) > 1e-6 ? ((marginChange / Math.abs(baseMargin)) * 100).toFixed(1) : '0'}%)
+                                                </div>
+                                            )}
                                             <div className={`text-xs font-semibold whitespace-nowrap ${marginPctChangeColor}`}>
                                                 {formatPercentage(marginPct)}
                                             </div>
+                                            {marginPctChange !== 0 && (
+                                                <div className={`text-xs ${marginPctChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    ({marginPctChange >= 0 ? '+' : ''}{marginPctChange.toFixed(1)}pp)
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 }
                                 
-                                // For other nodes, use normal change color logic
+                                // For other nodes, show value and change ($ and %)
                                 const changeColor = getChangeColor(baseAmount, scenarioAmount, false);
+                                const amountChange = scenarioAmount - baseAmount;
+                                const pctChange = Math.abs(baseAmount) > 1e-6 ? (amountChange / Math.abs(baseAmount)) * 100 : 0;
                                 
                                 return (
                                     <div key={period} className="text-right min-w-[110px] max-w-[110px] px-1.5 flex-shrink-0">
                                         <div className={`text-sm font-bold whitespace-nowrap ${changeColor}`}>
                                             {formatCurrency(scenarioAmount)}
                                         </div>
+                                        {amountChange !== 0 && (
+                                            <>
+                                                <div className={`text-xs font-medium whitespace-nowrap ${amountChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {amountChange >= 0 ? '+' : ''}{formatCurrency(amountChange)}
+                                                </div>
+                                                {Math.abs(baseAmount) > 1e-6 && (
+                                                    <div className={`text-xs whitespace-nowrap ${amountChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        ({amountChange >= 0 ? '+' : ''}{pctChange.toFixed(1)}%)
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
                                     </div>
                                 );
                             }) : (
@@ -1941,14 +1939,33 @@ export default function ScenarioModelingPage() {
                                                                 }`}
                                                             >
                                                                 {fieldNameToUse ? (
-                                                                    <div className="flex flex-col items-end space-y-1">
+                                                                    <div className="flex flex-col items-end space-y-0.5">
                                                                         <span>{displayValue}</span>
-                                                                        {change !== 0 && fieldNameToUse !== 'MarginPct' && (
-                                                                            <span className={`text-xs font-medium ${
-                                                                                change >= 0 ? 'text-green-600' : 'text-red-600'
-                                                                            }`}>
-                                                                                {change >= 0 ? '+' : ''}{formatCurrency(change)}
-                                                                            </span>
+                                                                        {change !== 0 && (
+                                                                            <>
+                                                                                {fieldNameToUse !== 'MarginPct' ? (
+                                                                                    <>
+                                                                                        <span className={`text-xs font-medium ${
+                                                                                            change >= 0 ? 'text-green-600' : 'text-red-600'
+                                                                                        }`}>
+                                                                                            {change >= 0 ? '+' : ''}{formatCurrency(change)}
+                                                                                        </span>
+                                                                                        {Math.abs(baseValue) > 1e-6 && (
+                                                                                            <span className={`text-xs ${
+                                                                                                change >= 0 ? 'text-green-600' : 'text-red-600'
+                                                                                            }`}>
+                                                                                                ({change >= 0 ? '+' : ''}{((change / Math.abs(baseValue)) * 100).toFixed(1)}%)
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </>
+                                                                                ) : (
+                                                                                    <span className={`text-xs font-medium ${
+                                                                                        change >= 0 ? 'text-green-600' : 'text-red-600'
+                                                                                    }`}>
+                                                                                        {change >= 0 ? '+' : ''}{change.toFixed(1)}pp
+                                                                                    </span>
+                                                                                )}
+                                                                            </>
                                                                         )}
                                                                     </div>
                                                                 ) : (
